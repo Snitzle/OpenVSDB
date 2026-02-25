@@ -138,6 +138,9 @@ export class MySqlClient implements DatabaseClient {
     const allowedColumns = new Set(info.columns.map((column) => column.name));
     const where = buildWhereClause('mysql', query.filter, allowedColumns);
     const order = buildOrderByClause('mysql', query.sort, allowedColumns);
+    const page = Number.isFinite(query.page) ? Math.max(0, Math.trunc(query.page)) : 0;
+    const pageSize = Number.isFinite(query.pageSize) ? Math.max(1, Math.trunc(query.pageSize)) : 50;
+    const offset = page * pageSize;
 
     const selectColumns = info.columns.map((column) => quoteIdentifier('mysql', column.name)).join(', ');
     const tableSql = quoteQualifiedIdentifier('mysql', query.schema, query.table);
@@ -146,12 +149,12 @@ export class MySqlClient implements DatabaseClient {
       `SELECT ${selectColumns} FROM ${tableSql}`,
       where.sql,
       order,
-      'LIMIT ? OFFSET ?',
+      `LIMIT ${pageSize} OFFSET ${offset}`,
     ]
       .filter((part) => part.length > 0)
       .join(' ');
 
-    const params = [...where.params, query.pageSize, query.page * query.pageSize];
+    const params = [...where.params];
     const [rows] = await this.pool.execute<RowDataPacket[]>(sql, params);
 
     const dataRows: RowData[] = rows.map((row) => this.rowPacketToRowData(row, info));
@@ -169,8 +172,8 @@ export class MySqlClient implements DatabaseClient {
       info,
       rows: dataRows,
       totalCount,
-      page: query.page,
-      pageSize: query.pageSize,
+      page,
+      pageSize,
     };
   }
 
