@@ -25,6 +25,8 @@ The Database Explorer opens as a **main-window editor tab**, not a sidebar view.
 
 **Explorer polish ✅ (2026-07-01):** constrained-width column; compact tree rows with `@vscode/codicons` icons (table / view / schema / connection), hover + selection states, per-schema counts, and an in-tree filter box; connection status as a dot; Edit/Remove as icon buttons; Add/Edit connection moved into a modal dialog. `media/main.js` is now bundled by esbuild (for the codicon CSS import) → `dist/main.js` + `dist/main.css` (codicon font inlined; `font-src data:` allows it).
 
+**Grid density pass ✅ (2026-07-01):** table view rebuilt to a single compact toolbar (icon buttons; right-sized page-size select; find box), the structured filter collapsed behind a Filter toggle + active-filter chip, Apply/Cancel replaced by a contextual pending-changes bar, a collapsible DDL panel, ~28px Tabulator rows, aggregate strip that excludes PK / auto-increment columns, sentence-case section headers, and codicons bundled into the grid webview (`dist/tablePanel.css`).
+
 ## Stage 0 — UX foundation ✅ (implemented 2026-06-23)
 - [x] esbuild build for webview assets (`media/tablePanel.js` → `dist/`), wired into npm scripts + the F5 preLaunchTask (`esbuild.js`).
 - [x] Integrate Tabulator: virtual scroll, column resize/reorder/show-hide, row selection, sticky header. (Freeze via header menu; multi-sort deferred to Stage 1 — the backend supports single-column sort today.)

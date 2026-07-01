@@ -1,4 +1,5 @@
 import { TabulatorFull as Tabulator } from 'tabulator-tables';
+import '@vscode/codicons/dist/codicon.css';
 import 'tabulator-tables/dist/css/tabulator.min.css';
 import './tabulator-vscode.css';
 
@@ -27,36 +28,46 @@ import './tabulator-vscode.css';
           <div id="tableMeta" class="muted">Waiting for database rows.</div>
         </div>
         <div class="inlineButtons">
-          <button id="btnRefreshTable" class="secondary">Refresh</button>
-          <button id="btnViewDdl" class="secondary" disabled>View DDL</button>
+          <button id="btnRefreshTable" class="iconBtn" title="Refresh" aria-label="Refresh"><i class="codicon codicon-refresh" aria-hidden="true"></i></button>
+          <button id="btnViewDdl" class="secondary hasIcon" disabled><i class="codicon codicon-code" aria-hidden="true"></i>DDL</button>
         </div>
       </div>
 
       <div id="tableWarning" class="warning" hidden></div>
 
-      <section class="panel">
+      <div class="gridSection">
         <div id="tableControls" hidden>
-          <div class="controlsRow">
-            <label>Page size
-              <select id="pageSize">
-                <option value="25">25</option>
-                <option value="50" selected>50</option>
-                <option value="100">100</option>
-                <option value="250">250</option>
-              </select>
-            </label>
-            <button id="btnPrevPage" class="secondary">Previous</button>
-            <button id="btnNextPage" class="secondary">Next</button>
-            <span id="pageInfo" class="muted"></span>
-            <label class="findField">Find in page
-              <input id="findInPage" placeholder="filter loaded rows" />
-            </label>
+          <div class="gridToolbar">
+            <button id="btnAddRow" class="hasIcon"><i class="codicon codicon-add" aria-hidden="true"></i>Row</button>
+            <button id="btnDuplicateRow" class="iconBtn" title="Duplicate selected row" aria-label="Duplicate selected row" disabled><i class="codicon codicon-copy" aria-hidden="true"></i></button>
+            <button id="btnDeleteRows" class="iconBtn danger" title="Delete selected rows" aria-label="Delete selected rows" disabled><i class="codicon codicon-trash" aria-hidden="true"></i></button>
+
+            <span class="toolbarDivider" aria-hidden="true"></span>
+
+            <button id="btnToggleFilter" class="secondary hasIcon" aria-pressed="false"><i class="codicon codicon-filter" aria-hidden="true"></i>Filter</button>
+            <button id="filterChip" class="filterChip" hidden></button>
+
+            <div class="findBox">
+              <i class="codicon codicon-search" aria-hidden="true"></i>
+              <input id="findInPage" placeholder="Find in page" />
+            </div>
+
             <span class="spacer"></span>
-            <button id="btnShowAllCols" class="secondary">Show all columns</button>
+
+            <button id="btnShowAllCols" class="iconBtn" title="Show all columns" aria-label="Show all columns"><i class="codicon codicon-eye" aria-hidden="true"></i></button>
+            <select id="pageSize" class="compactSelect" title="Page size" aria-label="Page size">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+            </select>
+            <button id="btnPrevPage" class="iconBtn" title="Previous page" aria-label="Previous page"><i class="codicon codicon-chevron-left" aria-hidden="true"></i></button>
+            <button id="btnNextPage" class="iconBtn" title="Next page" aria-label="Next page"><i class="codicon codicon-chevron-right" aria-hidden="true"></i></button>
+            <span id="pageInfo" class="muted"></span>
           </div>
 
-          <div class="controlsRow">
-            <label>Filter column
+          <div id="filterBar" class="filterBar" hidden>
+            <label>Column
               <select id="filterColumn"></select>
             </label>
             <label>Operator
@@ -74,37 +85,36 @@ import './tabulator-vscode.css';
                 <option value="isNotNull">is not null</option>
               </select>
             </label>
-            <label>Value
+            <label class="filterValueField">Value
               <input id="filterValue" placeholder="filter value" />
             </label>
-            <button id="btnApplyFilter" class="secondary">Apply Filter</button>
-            <button id="btnClearFilter" class="secondary">Clear Filter</button>
+            <button id="btnApplyFilter" class="secondary">Apply</button>
+            <button id="btnClearFilter" class="secondary">Clear</button>
           </div>
 
-          <div class="controlsRow">
-            <button id="btnAddRow">Add Row</button>
-            <button id="btnDuplicateRow" class="secondary">Duplicate Selected</button>
-            <button id="btnDeleteRows" class="danger">Delete Selected</button>
+          <div id="editBar" class="editBar" hidden>
+            <i class="codicon codicon-edit" aria-hidden="true"></i>
+            <span id="editInfo">0 pending changes</span>
             <span class="spacer"></span>
-            <span id="editInfo" class="muted"></span>
-            <button id="btnApplyEdits" class="secondary">Apply Changes</button>
-            <button id="btnCancelEdits" class="secondary">Cancel Changes</button>
+            <button id="btnCancelEdits" class="secondary">Revert</button>
+            <button id="btnApplyEdits">Submit</button>
           </div>
         </div>
 
         <div id="tableGridWrap" class="gridWrap"></div>
         <div id="aggregateStrip" class="aggregate muted"></div>
-      </section>
+      </div>
 
-      <section class="panel">
+      <section id="ddlSection" class="panel" hidden>
         <div class="panelHeader">
-          <h2 id="ddlTitle">DDL Viewer</h2>
+          <h2 id="ddlTitle">DDL</h2>
           <div class="inlineButtons">
             <button id="btnCopyDdl" class="secondary" disabled>Copy</button>
-            <button id="btnOpenDdl" class="secondary" disabled>Open In Editor</button>
+            <button id="btnOpenDdl" class="secondary" disabled>Open in editor</button>
+            <button id="btnCloseDdl" class="iconBtn" title="Hide DDL" aria-label="Hide DDL"><i class="codicon codicon-close" aria-hidden="true"></i></button>
           </div>
         </div>
-        <pre id="ddlOutput" class="ddl">Click "View DDL" to load the current object definition.</pre>
+        <pre id="ddlOutput" class="ddl"></pre>
       </section>
 
       <div id="statusBar" class="status"></div>
@@ -113,12 +123,12 @@ import './tabulator-vscode.css';
     <div id="rowModal" class="modal" hidden>
       <div class="modalContent">
         <div class="panelHeader">
-          <h2>Add Row</h2>
+          <h2>Add row</h2>
           <button id="btnCloseRowModal" class="secondary">Close</button>
         </div>
         <form id="rowForm"></form>
         <div class="actions">
-          <button id="btnSubmitRow" type="button">Insert Row</button>
+          <button id="btnSubmitRow" type="button">Insert row</button>
         </div>
       </div>
     </div>
@@ -177,6 +187,12 @@ import './tabulator-vscode.css';
     valueModalBody: document.getElementById('valueModalBody'),
     btnCopyValue: document.getElementById('btnCopyValue'),
     btnCloseValueModal: document.getElementById('btnCloseValueModal'),
+    btnToggleFilter: document.getElementById('btnToggleFilter'),
+    filterChip: document.getElementById('filterChip'),
+    filterBar: document.getElementById('filterBar'),
+    editBar: document.getElementById('editBar'),
+    ddlSection: document.getElementById('ddlSection'),
+    btnCloseDdl: document.getElementById('btnCloseDdl'),
   };
 
   elements.btnRefreshTable.addEventListener('click', () => sendRequest('refreshTable'));
@@ -188,6 +204,15 @@ import './tabulator-vscode.css';
         column.show();
       }
     }
+  });
+  elements.btnToggleFilter.addEventListener('click', () => {
+    const show = elements.filterBar.hidden;
+    elements.filterBar.hidden = !show;
+    elements.btnToggleFilter.setAttribute('aria-pressed', String(show));
+  });
+  elements.filterChip.addEventListener('click', () => clearFilter());
+  elements.btnCloseDdl.addEventListener('click', () => {
+    elements.ddlSection.hidden = true;
   });
   elements.pageSize.addEventListener('change', () => {
     if (!state.activeTable) {
@@ -216,19 +241,12 @@ import './tabulator-vscode.css';
 
     state.activeTable.filter = filter;
     state.activeTable.page = 0;
+    elements.filterBar.hidden = true;
+    elements.btnToggleFilter.setAttribute('aria-pressed', 'false');
     queryActiveTable();
   });
 
-  elements.btnClearFilter.addEventListener('click', () => {
-    if (!state.activeTable) {
-      return;
-    }
-
-    state.activeTable.filter = undefined;
-    elements.filterValue.value = '';
-    state.activeTable.page = 0;
-    queryActiveTable();
-  });
+  elements.btnClearFilter.addEventListener('click', () => clearFilter());
 
   elements.btnApplyEdits.addEventListener('click', () => applyPendingEdits());
   elements.btnCancelEdits.addEventListener('click', () => cancelEdits());
@@ -257,6 +275,7 @@ import './tabulator-vscode.css';
       return;
     }
 
+    elements.ddlSection.hidden = false;
     sendRequest('viewDdl');
   });
 
@@ -313,6 +332,7 @@ import './tabulator-vscode.css';
         renderMeta();
         renderGrid();
         populateFilterColumns();
+        updateFilterChip();
         break;
 
       case 'ddl':
@@ -377,9 +397,47 @@ import './tabulator-vscode.css';
     }
   }
 
+  function clearFilter() {
+    if (!state.activeTable) {
+      return;
+    }
+    state.activeTable.filter = undefined;
+    elements.filterValue.value = '';
+    state.activeTable.page = 0;
+    queryActiveTable();
+  }
+
+  function updateFilterChip() {
+    const filter = state.activeTable && state.activeTable.filter;
+    if (!filter) {
+      elements.filterChip.hidden = true;
+      elements.filterChip.textContent = '';
+      return;
+    }
+    const opLabels = {
+      eq: '=',
+      neq: '!=',
+      gt: '>',
+      gte: '>=',
+      lt: '<',
+      lte: '<=',
+      contains: 'contains',
+      startsWith: 'starts with',
+      endsWith: 'ends with',
+      isNull: 'is null',
+      isNotNull: 'is not null',
+    };
+    const opText = opLabels[filter.operator] || filter.operator;
+    const valueText =
+      filter.operator === 'isNull' || filter.operator === 'isNotNull' ? '' : ` ${filter.value ?? ''}`;
+    elements.filterChip.hidden = false;
+    elements.filterChip.title = 'Clear filter';
+    elements.filterChip.textContent = `${filter.column} ${opText}${valueText}  ✕`;
+  }
+
   function renderMeta() {
     if (!state.activeTable) {
-      elements.tableTitle.textContent = 'Loading table...';
+      elements.tableTitle.textContent = 'Loading table…';
       elements.tableMeta.textContent = 'Waiting for database rows.';
       elements.tableControls.hidden = true;
       elements.btnViewDdl.disabled = true;
@@ -441,6 +499,7 @@ import './tabulator-vscode.css';
       selectableRows: active.info.readOnly ? false : true,
       placeholder: 'No rows.',
       reactiveData: false,
+      rowHeight: 28,
       columnDefaults: { resizable: true, headerSort: false },
     });
 
@@ -639,10 +698,9 @@ import './tabulator-vscode.css';
 
   function updateEditInfo() {
     const count = state.pendingEdits.size;
-    elements.editInfo.textContent = count ? `${count} pending change${count === 1 ? '' : 's'}` : '';
     const readOnly = !state.activeTable || state.activeTable.info.readOnly;
-    elements.btnApplyEdits.disabled = readOnly || count === 0;
-    elements.btnCancelEdits.disabled = readOnly || count === 0;
+    elements.editInfo.textContent = `${count} pending change${count === 1 ? '' : 's'}`;
+    elements.editBar.hidden = readOnly || count === 0;
   }
 
   function updateSelectionButtons() {
@@ -760,7 +818,7 @@ import './tabulator-vscode.css';
     const parts = [`Rows: ${scope}`];
 
     for (const column of active.info.columns) {
-      if (!columnIsNumeric(column)) {
+      if (!columnIsNumeric(column) || column.isPrimaryKey || column.isAutoIncrement) {
         continue;
       }
       const numbers = rows
@@ -955,8 +1013,8 @@ import './tabulator-vscode.css';
   }
 
   function renderDdl() {
-    elements.ddlTitle.textContent = state.ddl.title ? `DDL: ${state.ddl.title}` : 'DDL Viewer';
-    elements.ddlOutput.textContent = state.ddl.text || 'Click "View DDL" to load the current object definition.';
+    elements.ddlTitle.textContent = state.ddl.title ? `DDL · ${state.ddl.title}` : 'DDL';
+    elements.ddlOutput.textContent = state.ddl.text || 'Loading…';
 
     const hasDdl = Boolean(state.ddl.text);
     elements.btnCopyDdl.disabled = !hasDdl;
