@@ -1,3 +1,5 @@
+import '@vscode/codicons/dist/codicon.css';
+
 (() => {
   const vscode = acquireVsCodeApi();
 
@@ -5,6 +7,7 @@
     connections: [],
     tree: [],
     selectedObject: null,
+    filterTerm: '',
     connectionForm: {
       visible: false,
       mode: 'add',
@@ -16,10 +19,11 @@
 
   const app = document.getElementById('app');
   app.innerHTML = `
-    <div class="root">
-      <section class="panel" id="connectionFormPanel" hidden>
+    <div class="root explorerRoot">
+      <div class="modal" id="connectionFormPanel" hidden>
+        <div class="modalContent">
         <div class="panelHeader">
-          <h2 id="connectionFormTitle">Add Connection</h2>
+          <h2 id="connectionFormTitle">Add connection</h2>
           <button id="btnCancelConnectionForm" class="secondary">Close</button>
         </div>
 
@@ -93,18 +97,23 @@
           </div>
 
           <div class="actions">
-            <button type="submit" id="btnSaveConnection">Save Connection</button>
+            <button type="submit" id="btnSaveConnection">Save connection</button>
           </div>
         </form>
-      </section>
+        </div>
+      </div>
 
       <section class="panel">
         <div class="panelHeader">
           <h2>Connections</h2>
           <div class="inlineButtons">
-            <button id="btnAddConnection">Add Connection</button>
+            <button id="btnAddConnection">Add connection</button>
             <button id="btnRefreshTree" class="secondary">Refresh</button>
           </div>
+        </div>
+        <div class="treeFilter">
+          <i class="codicon codicon-search" aria-hidden="true"></i>
+          <input id="objectFilter" placeholder="Filter tables and views" />
         </div>
         <div id="connectionTree" class="tree"></div>
       </section>
@@ -138,6 +147,7 @@
     clearPasswordWrap: document.getElementById('clearPasswordWrap'),
     mysqlClearPassword: document.getElementById('mysqlClearPassword'),
     connectionTree: document.getElementById('connectionTree'),
+    objectFilter: document.getElementById('objectFilter'),
     btnAddConnection: document.getElementById('btnAddConnection'),
     btnRefreshTree: document.getElementById('btnRefreshTree'),
     statusBar: document.getElementById('statusBar'),
@@ -148,6 +158,15 @@
   elements.btnBrowseSqlite.addEventListener('click', () => sendRequest('pickSqliteFile'));
   elements.btnAddConnection.addEventListener('click', () => openConnectionForm('add'));
   elements.btnRefreshTree.addEventListener('click', () => sendRequest('refreshTree'));
+  elements.objectFilter.addEventListener('input', () => {
+    state.filterTerm = elements.objectFilter.value;
+    renderConnectionTree();
+  });
+  elements.connectionFormPanel.addEventListener('click', (event) => {
+    if (event.target === elements.connectionFormPanel) {
+      hideConnectionForm();
+    }
+  });
 
   elements.connectionForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -209,7 +228,7 @@
     state.connectionForm.mode = mode;
     state.connectionForm.editingId = connection ? connection.id : undefined;
 
-    elements.connectionFormTitle.textContent = mode === 'add' ? 'Add Connection' : 'Edit Connection';
+    elements.connectionFormTitle.textContent = mode === 'add' ? 'Add connection' : 'Edit connection';
     elements.connectionFormPanel.hidden = false;
     elements.clearPasswordWrap.hidden = mode !== 'edit';
 
@@ -327,9 +346,14 @@
     tree.innerHTML = '';
 
     if (state.tree.length === 0) {
-      tree.textContent = 'No connections yet. Click "Add Connection" to create one.';
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'No connections yet. Click "Add connection" to create one.';
+      tree.appendChild(empty);
       return;
     }
+
+    const term = state.filterTerm.trim().toLowerCase();
 
     for (const connection of state.tree) {
       const block = document.createElement('div');
@@ -340,27 +364,36 @@
 
       const title = document.createElement('div');
       title.className = 'treeTitle';
-      title.textContent = `${connection.name} (${connection.connectionType})`;
+      const connectionIcon = connection.connectionType === 'mysql' ? 'codicon-server' : 'codicon-database';
+      title.innerHTML =
+        `<i class="codicon ${connectionIcon}" aria-hidden="true"></i>` +
+        `<span class="treeName">${escapeHtml(connection.name)}</span>` +
+        `<span class="treeType">${escapeHtml(connection.connectionType)}</span>`;
       header.appendChild(title);
 
       const status = document.createElement('span');
-      status.className = connection.status === 'connected' ? 'badge ok' : 'badge err';
-      status.textContent = connection.status;
+      status.className = connection.status === 'connected' ? 'statusDot ok' : 'statusDot err';
+      status.title = connection.status === 'connected' ? 'Connected' : connection.message || 'Connection error';
+      status.innerHTML = '<i class="codicon codicon-circle-filled" aria-hidden="true"></i>';
       header.appendChild(status);
 
       const actions = document.createElement('div');
       actions.className = 'inlineButtons';
 
       const editBtn = document.createElement('button');
-      editBtn.className = 'secondary small';
-      editBtn.textContent = 'Edit';
+      editBtn.className = 'iconBtn';
+      editBtn.title = 'Edit connection';
+      editBtn.setAttribute('aria-label', 'Edit connection');
+      editBtn.innerHTML = '<i class="codicon codicon-edit" aria-hidden="true"></i>';
       editBtn.addEventListener('click', () => {
         sendRequest('selectConnectionForEdit', { connectionId: connection.connectionId });
       });
 
       const removeBtn = document.createElement('button');
-      removeBtn.className = 'danger small';
-      removeBtn.textContent = 'Remove';
+      removeBtn.className = 'iconBtn danger';
+      removeBtn.title = 'Remove connection';
+      removeBtn.setAttribute('aria-label', 'Remove connection');
+      removeBtn.innerHTML = '<i class="codicon codicon-trash" aria-hidden="true"></i>';
       removeBtn.addEventListener('click', () => {
         if (!confirm(`Remove connection "${connection.name}"?`)) {
           return;
@@ -382,20 +415,46 @@
       }
 
       for (const schema of connection.schemas) {
+        const matchingObjects = term
+          ? schema.objects.filter((object) => object.name.toLowerCase().includes(term))
+          : schema.objects;
+
+        if (term && matchingObjects.length === 0) {
+          continue;
+        }
+
         const schemaDetails = document.createElement('details');
         schemaDetails.className = 'treeSchema';
+        schemaDetails.open = true;
 
         const summary = document.createElement('summary');
-        summary.textContent = schema.name;
+        const tableCount = schema.objects.filter((object) => object.type !== 'view').length;
+        const viewCount = schema.objects.filter((object) => object.type === 'view').length;
+        const counts = [];
+        if (tableCount) {
+          counts.push(`${tableCount} table${tableCount === 1 ? '' : 's'}`);
+        }
+        if (viewCount) {
+          counts.push(`${viewCount} view${viewCount === 1 ? '' : 's'}`);
+        }
+        summary.innerHTML =
+          '<i class="codicon codicon-chevron-right treeChevron" aria-hidden="true"></i>' +
+          '<i class="codicon codicon-symbol-namespace" aria-hidden="true"></i>' +
+          `<span class="schemaName">${escapeHtml(schema.name)}</span>` +
+          `<span class="schemaCount">${escapeHtml(counts.join(' · '))}</span>`;
         schemaDetails.appendChild(summary);
 
         const objectList = document.createElement('div');
         objectList.className = 'treeObjects';
 
-        for (const object of schema.objects) {
+        for (const object of matchingObjects) {
           const objectButton = document.createElement('button');
           objectButton.className = 'treeObject';
-          objectButton.textContent = `${object.type === 'view' ? 'VIEW' : 'TABLE'} ${object.name}`;
+          const objectIcon = object.type === 'view' ? 'codicon-eye' : 'codicon-table';
+          objectButton.innerHTML =
+            `<i class="codicon ${objectIcon}" aria-hidden="true"></i>` +
+            `<span class="objectName">${escapeHtml(object.name)}</span>`;
+          objectButton.title = `${object.type === 'view' ? 'View' : 'Table'} ${schema.name}.${object.name}`;
 
           if (
             state.selectedObject &&
@@ -450,5 +509,14 @@
   function normalizeOptional(value) {
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 })();

@@ -45,8 +45,8 @@ export class ExplorerPanel implements vscode.Disposable {
 
     panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'database.svg');
     panel.webview.html = renderWebviewHtml(this.context, panel.webview, {
-      scriptFile: 'media/main.js',
-      styleFiles: ['media/main.css'],
+      scriptFile: 'dist/main.js',
+      styleFiles: ['media/main.css', 'dist/main.css'],
       title: 'Database Explorer',
       surface: 'panel',
     });

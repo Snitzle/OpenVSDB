@@ -23,6 +23,8 @@ The driving insight: **one great data grid is the backbone of four of the five w
 ## UI shell ✅ (implemented 2026-06-23)
 The Database Explorer opens as a **main-window editor tab**, not a sidebar view. The activity-bar icon is a lightweight launcher (`viewsWelcome`) whose button opens/reveals the tab, and the view auto-opens it when shown. Tables open as their own grid tabs beside the explorer. See `src/webview/explorerPanel.ts` and the `dbExplorer.open` command.
 
+**Explorer polish ✅ (2026-07-01):** constrained-width column; compact tree rows with `@vscode/codicons` icons (table / view / schema / connection), hover + selection states, per-schema counts, and an in-tree filter box; connection status as a dot; Edit/Remove as icon buttons; Add/Edit connection moved into a modal dialog. `media/main.js` is now bundled by esbuild (for the codicon CSS import) → `dist/main.js` + `dist/main.css` (codicon font inlined; `font-src data:` allows it).
+
 ## Stage 0 — UX foundation ✅ (implemented 2026-06-23)
 - [x] esbuild build for webview assets (`media/tablePanel.js` → `dist/`), wired into npm scripts + the F5 preLaunchTask (`esbuild.js`).
 - [x] Integrate Tabulator: virtual scroll, column resize/reorder/show-hide, row selection, sticky header. (Freeze via header menu; multi-sort deferred to Stage 1 — the backend supports single-column sort today.)

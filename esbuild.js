@@ -7,7 +7,7 @@ const watch = process.argv.includes('--watch');
 
 /** @type {import('esbuild').BuildOptions} */
 const options = {
-  entryPoints: ['media/tablePanel.js'],
+  entryPoints: ['media/tablePanel.js', 'media/main.js'],
   bundle: true,
   format: 'iife',
   platform: 'browser',
