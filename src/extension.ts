@@ -1,39 +1,45 @@
 import * as vscode from 'vscode';
 import { DbClientManager } from './db/clientManager';
 import { ConnectionStore } from './state/connectionStore';
-import { SidebarViewProvider } from './webview/sidebarViewProvider';
+import { ExplorerPanel } from './webview/explorerPanel';
 import { TablePanelManager } from './webview/tablePanelManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context);
   const clientManager = new DbClientManager(connectionStore);
   const tablePanels = new TablePanelManager(context, connectionStore, clientManager);
-  const provider = new SidebarViewProvider(context, connectionStore, clientManager, tablePanels);
+  const explorer = new ExplorerPanel(context, connectionStore, clientManager, tablePanels);
+
+  // The activity-bar entry is a lightweight launcher: an empty tree whose welcome
+  // content opens the Database Explorer in a main-window editor tab.
+  const launcher = vscode.window.createTreeView('dbExplorer.home', {
+    treeDataProvider: new LauncherTreeProvider(),
+  });
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(SidebarViewProvider.viewId, provider, {
-      webviewOptions: {
-        retainContextWhenHidden: true,
-      },
+    launcher,
+    launcher.onDidChangeVisibility((event) => {
+      if (event.visible) {
+        explorer.open();
+      }
     }),
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('dbExplorer.open', () => {
+      explorer.open();
+    }),
     vscode.commands.registerCommand('dbExplorer.refresh', async () => {
-      await Promise.all([provider.refresh(), tablePanels.refreshAll()]);
+      await Promise.all([explorer.refresh(), tablePanels.refreshAll()]);
     }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('dbExplorer.addConnection', async () => {
-      await vscode.commands.executeCommand('workbench.view.extension.dbExplorer');
-      provider.requestAddConnection();
+    vscode.commands.registerCommand('dbExplorer.addConnection', () => {
+      explorer.requestAddConnection();
     }),
   );
 
   context.subscriptions.push(
     new vscode.Disposable(() => {
-      provider.dispose();
+      explorer.dispose();
       tablePanels.dispose();
       void clientManager.disposeAll();
     }),
@@ -42,4 +48,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   // Resources are disposed through extension subscriptions.
+}
+
+class LauncherTreeProvider implements vscode.TreeDataProvider<never> {
+  getTreeItem(element: never): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(): never[] {
+    return [];
+  }
 }

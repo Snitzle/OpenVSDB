@@ -25,14 +25,23 @@
     "views": {
       "dbExplorer": [
         {
-          "icon": "./media/database.svg",
-          "type": "webview",
-          "id": "dbExplorer.sidebar",
+          "id": "dbExplorer.home",
           "name": "Database Explorer"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "dbExplorer.home",
+        "contents": "Browse and edit your databases in a dedicated editor tab.\n[Open Database Explorer](command:dbExplorer.open)\n[Add Connection](command:dbExplorer.addConnection)"
+      }
+    ],
     "commands": [
+      {
+        "command": "dbExplorer.open",
+        "title": "DB Explorer: Open",
+        "icon": "$(window)"
+      },
       {
         "command": "dbExplorer.addConnection",
         "title": "DB Explorer: Add Connection",
@@ -47,13 +56,18 @@
     "menus": {
       "view/title": [
         {
+          "command": "dbExplorer.open",
+          "when": "view == dbExplorer.home",
+          "group": "navigation@0"
+        },
+        {
           "command": "dbExplorer.addConnection",
-          "when": "view == dbExplorer.sidebar",
+          "when": "view == dbExplorer.home",
           "group": "navigation@1"
         },
         {
           "command": "dbExplorer.refresh",
-          "when": "view == dbExplorer.sidebar",
+          "when": "view == dbExplorer.home",
           "group": "navigation@2"
         }
       ]
@@ -61,7 +75,11 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "build:webview": "node esbuild.js",
+    "build:webview:watch": "node esbuild.js --watch",
+    "build": "npm run compile && npm run build:webview",
     "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run build",
     "test": "npm run compile && mocha \"out/test/**/*.test.js\""
   },
   "dependencies": {
@@ -74,7 +92,9 @@
     "@types/node": "^22.14.1",
     "@types/uuid": "^10.0.0",
     "@types/vscode": "^1.90.0",
+    "esbuild": "^0.21.5",
     "mocha": "^11.1.0",
+    "tabulator-tables": "^6.3.0",
     "typescript": "^5.8.2"
   }
 }

@@ -6,11 +6,15 @@ import { SidebarExtensionEvent, SidebarWebviewRequest } from './protocol';
 import { TablePanelManager } from './tablePanelManager';
 import { renderWebviewHtml, toUserError } from './utils';
 
-export class SidebarViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewId = 'dbExplorer.sidebar';
-
-  private view: vscode.WebviewView | undefined;
+/**
+ * The Database Explorer as a singleton editor tab (main window) rather than a
+ * sidebar view. Hosts connection management and the schema tree; opening a table
+ * delegates to {@link TablePanelManager}, which opens the grid as its own tab.
+ */
+export class ExplorerPanel implements vscode.Disposable {
+  private panel: vscode.WebviewPanel | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  private pendingAddConnection = false;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -19,40 +23,75 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     private readonly tablePanels: TablePanelManager,
   ) {}
 
-  resolveWebviewView(view: vscode.WebviewView): void {
-    this.view = view;
-    view.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')],
-    };
+  open(): void {
+    if (this.panel) {
+      this.panel.reveal(vscode.ViewColumn.Active, false);
+      return;
+    }
 
-    view.webview.html = renderWebviewHtml(this.context, view.webview, {
-      scriptFile: 'main.js',
-      title: 'DB Explorer',
-      surface: 'sidebar',
+    const panel = vscode.window.createWebviewPanel(
+      'dbExplorer.explorer',
+      'Database Explorer',
+      { preserveFocus: false, viewColumn: vscode.ViewColumn.Active },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+          vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
+        ],
+      },
+    );
+
+    panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'database.svg');
+    panel.webview.html = renderWebviewHtml(this.context, panel.webview, {
+      scriptFile: 'media/main.js',
+      styleFiles: ['media/main.css'],
+      title: 'Database Explorer',
+      surface: 'panel',
     });
 
-    const messageDisposable = view.webview.onDidReceiveMessage(async (message: SidebarWebviewRequest) => {
-      await this.handleMessage(message);
-    });
+    this.panel = panel;
 
-    const disposeDisposable = view.onDidDispose(() => {
-      this.view = undefined;
-    });
-
-    this.disposables.push(messageDisposable, disposeDisposable);
+    this.disposables.push(
+      panel.webview.onDidReceiveMessage(async (message: SidebarWebviewRequest) => {
+        await this.handleMessage(message);
+        if (message.kind === 'ready' && this.pendingAddConnection) {
+          this.pendingAddConnection = false;
+          this.postEvent({ kind: 'triggerAddConnection' });
+        }
+      }),
+      panel.onDidDispose(() => {
+        this.panel = undefined;
+        vscode.Disposable.from(...this.disposables).dispose();
+        this.disposables.length = 0;
+      }),
+    );
   }
 
   async refresh(): Promise<void> {
-    await this.postState();
+    if (this.panel) {
+      await this.postState();
+    }
   }
 
   requestAddConnection(): void {
-    this.postEvent({ kind: 'triggerAddConnection' });
+    const wasOpen = Boolean(this.panel);
+    this.open();
+
+    if (wasOpen) {
+      this.postEvent({ kind: 'triggerAddConnection' });
+    } else {
+      // Defer until the freshly created webview signals it is ready.
+      this.pendingAddConnection = true;
+    }
   }
 
   dispose(): void {
     vscode.Disposable.from(...this.disposables).dispose();
+    this.disposables.length = 0;
+    this.panel?.dispose();
+    this.panel = undefined;
   }
 
   private async handleMessage(message: SidebarWebviewRequest): Promise<void> {
@@ -107,8 +146,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
   private async buildTree(): Promise<ConnectionTreeNode[]> {
     const connections = await this.connectionStore.listConnections();
-    const results = await Promise.all(connections.map((connection) => this.buildConnectionNode(connection)));
-    return results;
+    return Promise.all(connections.map((connection) => this.buildConnectionNode(connection)));
   }
 
   private async buildConnectionNode(connection: ConnectionMeta): Promise<ConnectionTreeNode> {
@@ -195,18 +233,18 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   }
 
   private postEvent(event: SidebarExtensionEvent, requestId?: string): void {
-    if (!this.view) {
+    if (!this.panel) {
       return;
     }
 
-    void this.view.webview.postMessage({
+    void this.panel.webview.postMessage({
       ...event,
       requestId,
     });
   }
 
   private assertNever(_message: never): never {
-    throw new Error('Unhandled sidebar webview request.');
+    throw new Error('Unhandled explorer webview request.');
   }
 }
 

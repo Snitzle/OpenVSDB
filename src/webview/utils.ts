@@ -4,22 +4,32 @@ export function renderWebviewHtml(
   context: vscode.ExtensionContext,
   webview: vscode.Webview,
   options: {
+    /** Path to the script, relative to the extension root (e.g. 'dist/tablePanel.js'). */
     scriptFile: string;
+    /** Stylesheet paths, relative to the extension root (e.g. 'media/main.css'). */
+    styleFiles: string[];
     title: string;
     surface: 'sidebar' | 'panel';
   },
 ): string {
-  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', options.scriptFile));
-  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'main.css'));
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, options.scriptFile));
+  const styleLinks = options.styleFiles
+    .map((file) => {
+      const uri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, file));
+      return `<link rel="stylesheet" href="${uri}">`;
+    })
+    .join('\n  ');
   const nonce = createNonce();
 
+  // 'unsafe-inline' for style-src is required because the grid library (Tabulator)
+  // injects a small amount of inline styling; img/font 'data:' covers its embedded icons.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-  <link rel="stylesheet" href="${styleUri}">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';">
+  ${styleLinks}
   <title>${escapeHtml(options.title)}</title>
 </head>
 <body data-surface="${options.surface}">

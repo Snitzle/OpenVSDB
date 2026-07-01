@@ -121,13 +121,17 @@ class TablePanelInstance implements vscode.Disposable {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')],
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+          vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
+        ],
       },
     );
 
     this.panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'database.svg');
     this.panel.webview.html = renderWebviewHtml(this.context, this.panel.webview, {
-      scriptFile: 'tablePanel.js',
+      scriptFile: 'dist/tablePanel.js',
+      styleFiles: ['media/main.css', 'dist/tablePanel.css'],
       title: this.buildTitle(),
       surface: 'panel',
     });

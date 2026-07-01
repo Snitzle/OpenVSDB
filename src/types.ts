@@ -154,6 +154,21 @@ export interface TableQueryResult {
   pageSize: number;
 }
 
+/**
+ * Result of one statement executed through the raw SQL path. Row-producing
+ * statements (SELECT, etc.) populate `columns`/`rows`; data/DDL statements
+ * report `affectedRows` and (when available) `lastInsertId`.
+ */
+export interface RawQueryResult {
+  statementIndex: number;
+  columns: string[];
+  rows: Scalar[][];
+  rowCount: number;
+  affectedRows?: number;
+  lastInsertId?: Scalar;
+  durationMs: number;
+}
+
 export interface RowUpdate {
   key: RowKey;
   changes: Record<string, Scalar>;

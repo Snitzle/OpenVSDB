@@ -1,15 +1,19 @@
+import { TabulatorFull as Tabulator } from 'tabulator-tables';
+import 'tabulator-tables/dist/css/tabulator.min.css';
+import './tabulator-vscode.css';
+
 (() => {
   const vscode = acquireVsCodeApi();
 
   const state = {
     activeTable: null,
-    selectedRowKeys: new Set(),
     pendingEdits: new Map(),
     ddl: {
       title: '',
       text: '',
       objectType: 'table',
     },
+    tabulator: null,
   };
 
   let requestCounter = 0;
@@ -44,6 +48,11 @@
             <button id="btnPrevPage" class="secondary">Previous</button>
             <button id="btnNextPage" class="secondary">Next</button>
             <span id="pageInfo" class="muted"></span>
+            <label class="findField">Find in page
+              <input id="findInPage" placeholder="filter loaded rows" />
+            </label>
+            <span class="spacer"></span>
+            <button id="btnShowAllCols" class="secondary">Show all columns</button>
           </div>
 
           <div class="controlsRow">
@@ -76,12 +85,15 @@
             <button id="btnAddRow">Add Row</button>
             <button id="btnDuplicateRow" class="secondary">Duplicate Selected</button>
             <button id="btnDeleteRows" class="danger">Delete Selected</button>
+            <span class="spacer"></span>
+            <span id="editInfo" class="muted"></span>
             <button id="btnApplyEdits" class="secondary">Apply Changes</button>
             <button id="btnCancelEdits" class="secondary">Cancel Changes</button>
           </div>
         </div>
 
         <div id="tableGridWrap" class="gridWrap"></div>
+        <div id="aggregateStrip" class="aggregate muted"></div>
       </section>
 
       <section class="panel">
@@ -110,6 +122,19 @@
         </div>
       </div>
     </div>
+
+    <div id="valueModal" class="modal" hidden>
+      <div class="modalContent">
+        <div class="panelHeader">
+          <h2 id="valueModalTitle">Value</h2>
+          <div class="inlineButtons">
+            <button id="btnCopyValue" class="secondary">Copy</button>
+            <button id="btnCloseValueModal" class="secondary">Close</button>
+          </div>
+        </div>
+        <pre id="valueModalBody" class="ddl"></pre>
+      </div>
+    </div>
   `;
 
   const elements = {
@@ -124,6 +149,7 @@
     btnPrevPage: document.getElementById('btnPrevPage'),
     btnNextPage: document.getElementById('btnNextPage'),
     pageInfo: document.getElementById('pageInfo'),
+    btnShowAllCols: document.getElementById('btnShowAllCols'),
     filterColumn: document.getElementById('filterColumn'),
     filterOperator: document.getElementById('filterOperator'),
     filterValue: document.getElementById('filterValue'),
@@ -132,6 +158,7 @@
     btnAddRow: document.getElementById('btnAddRow'),
     btnDuplicateRow: document.getElementById('btnDuplicateRow'),
     btnDeleteRows: document.getElementById('btnDeleteRows'),
+    editInfo: document.getElementById('editInfo'),
     btnApplyEdits: document.getElementById('btnApplyEdits'),
     btnCancelEdits: document.getElementById('btnCancelEdits'),
     ddlTitle: document.getElementById('ddlTitle'),
@@ -143,11 +170,25 @@
     rowForm: document.getElementById('rowForm'),
     btnCloseRowModal: document.getElementById('btnCloseRowModal'),
     btnSubmitRow: document.getElementById('btnSubmitRow'),
+    findInPage: document.getElementById('findInPage'),
+    aggregateStrip: document.getElementById('aggregateStrip'),
+    valueModal: document.getElementById('valueModal'),
+    valueModalTitle: document.getElementById('valueModalTitle'),
+    valueModalBody: document.getElementById('valueModalBody'),
+    btnCopyValue: document.getElementById('btnCopyValue'),
+    btnCloseValueModal: document.getElementById('btnCloseValueModal'),
   };
 
   elements.btnRefreshTable.addEventListener('click', () => sendRequest('refreshTable'));
   elements.btnPrevPage.addEventListener('click', () => changePage(-1));
   elements.btnNextPage.addEventListener('click', () => changePage(1));
+  elements.btnShowAllCols.addEventListener('click', () => {
+    if (state.tabulator) {
+      for (const column of state.tabulator.getColumns()) {
+        column.show();
+      }
+    }
+  });
   elements.pageSize.addEventListener('change', () => {
     if (!state.activeTable) {
       return;
@@ -190,16 +231,26 @@
   });
 
   elements.btnApplyEdits.addEventListener('click', () => applyPendingEdits());
-  elements.btnCancelEdits.addEventListener('click', () => {
-    state.pendingEdits.clear();
-    renderTable();
-  });
+  elements.btnCancelEdits.addEventListener('click', () => cancelEdits());
 
   elements.btnAddRow.addEventListener('click', () => openAddRowModal());
   elements.btnCloseRowModal.addEventListener('click', () => closeAddRowModal());
   elements.btnSubmitRow.addEventListener('click', () => submitAddRow());
   elements.btnDuplicateRow.addEventListener('click', () => duplicateSelectedRow());
   elements.btnDeleteRows.addEventListener('click', () => deleteSelectedRows());
+  elements.findInPage.addEventListener('input', () => applyFindFilter());
+  elements.btnCloseValueModal.addEventListener('click', () => {
+    elements.valueModal.hidden = true;
+  });
+  elements.btnCopyValue.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(elements.valueModalBody.textContent || '');
+      showStatus('Value copied to clipboard.');
+    } catch (error) {
+      showStatus('Copy failed.', true);
+      console.error(error);
+    }
+  });
 
   elements.btnViewDdl.addEventListener('click', () => {
     if (!state.activeTable) {
@@ -257,9 +308,10 @@
           totalCount: message.totalCount,
         };
         elements.pageSize.value = String(message.pageSize);
+        elements.findInPage.value = '';
         state.pendingEdits.clear();
-        state.selectedRowKeys.clear();
-        renderTable();
+        renderMeta();
+        renderGrid();
         populateFilterColumns();
         break;
 
@@ -325,12 +377,11 @@
     }
   }
 
-  function renderTable() {
+  function renderMeta() {
     if (!state.activeTable) {
       elements.tableTitle.textContent = 'Loading table...';
       elements.tableMeta.textContent = 'Waiting for database rows.';
       elements.tableControls.hidden = true;
-      elements.tableGridWrap.innerHTML = '';
       elements.btnViewDdl.disabled = true;
       elements.tableWarning.hidden = true;
       elements.pageInfo.textContent = '';
@@ -350,6 +401,8 @@
       : `No rows. Total ${total}`;
     elements.tableMeta.textContent = `${active.info.objectType.toUpperCase()} • ${active.info.columns.length} columns`;
 
+    elements.btnPrevPage.disabled = active.page <= 0;
+
     if (active.info.readOnly) {
       elements.tableWarning.hidden = false;
       elements.tableWarning.textContent = active.info.readOnlyReason || 'Read-only object.';
@@ -359,106 +412,204 @@
     }
 
     elements.btnAddRow.disabled = active.info.readOnly;
-    elements.btnDeleteRows.disabled = active.info.readOnly;
-    elements.btnDuplicateRow.disabled = active.info.readOnly;
-    elements.btnApplyEdits.disabled = active.info.readOnly;
-    elements.btnCancelEdits.disabled = active.info.readOnly;
+    updateEditInfo();
+    updateSelectionButtons();
+  }
 
-    const table = document.createElement('table');
-    table.className = 'grid';
-
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-
-    const selectHeader = document.createElement('th');
-    selectHeader.textContent = '';
-    headerRow.appendChild(selectHeader);
-
-    for (const column of active.info.columns) {
-      const th = document.createElement('th');
-      const sort = active.sort && active.sort.column === column.name ? active.sort.direction : '';
-      th.innerHTML = `<button class="headerSort" data-column="${escapeHtml(column.name)}">${escapeHtml(
-        column.name,
-      )}${sort === 'asc' ? ' ▲' : sort === 'desc' ? ' ▼' : ''}</button>`;
-      headerRow.appendChild(th);
+  function renderGrid() {
+    const active = state.activeTable;
+    if (!active) {
+      return;
     }
 
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-
-    for (const row of active.rows) {
-      const tr = document.createElement('tr');
-      const rowKey = rowKeyString(row.key);
-      const rowEdit = rowKey ? state.pendingEdits.get(rowKey) : undefined;
-
-      const selectCell = document.createElement('td');
-      if (row.key) {
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = state.selectedRowKeys.has(rowKey);
-        checkbox.addEventListener('change', () => {
-          if (!rowKey) {
-            return;
-          }
-
-          if (checkbox.checked) {
-            state.selectedRowKeys.add(rowKey);
-          } else {
-            state.selectedRowKeys.delete(rowKey);
-          }
-        });
-        selectCell.appendChild(checkbox);
+    if (state.tabulator) {
+      try {
+        state.tabulator.destroy();
+      } catch (error) {
+        console.error(error);
       }
-      tr.appendChild(selectCell);
+      state.tabulator = null;
+    }
 
+    const table = new Tabulator(elements.tableGridWrap, {
+      data: buildData(active),
+      columns: buildColumns(active),
+      index: '_dbx_i',
+      layout: 'fitDataStretch',
+      height: '100%',
+      movableColumns: true,
+      selectableRows: active.info.readOnly ? false : true,
+      placeholder: 'No rows.',
+      reactiveData: false,
+      columnDefaults: { resizable: true, headerSort: false },
+    });
+
+    table.on('tableBuilt', () => {
+      updateSelectionButtons();
+      updateAggregateStrip();
+      applyFindFilter();
+    });
+    table.on('rowSelectionChanged', () => {
+      updateSelectionButtons();
+      updateAggregateStrip();
+    });
+
+    state.tabulator = table;
+  }
+
+  function buildData(active) {
+    return active.rows.map((row, index) => {
+      const item = { _dbx_i: index };
       for (const column of active.info.columns) {
-        const td = document.createElement('td');
-        const currentValue =
-          rowEdit && Object.prototype.hasOwnProperty.call(rowEdit.changes, column.name)
-            ? rowEdit.changes[column.name]
-            : row.values[column.name];
-
-        const valueText = scalarToText(currentValue);
-        const isKeyColumn = active.info.writableKey.columns.includes(column.name);
-        const editable = !active.info.readOnly && row.key && !column.isAutoIncrement && !isKeyColumn;
-
-        if (!editable) {
-          td.textContent = valueText;
-        } else {
-          const input = document.createElement('input');
-          input.className = 'cellInput';
-          input.value = valueText === 'NULL' ? '' : valueText;
-          input.placeholder = column.nullable ? 'NULL' : '';
-          input.dataset.rowKey = rowKey;
-          input.dataset.column = column.name;
-          input.addEventListener('change', () => {
-            onCellEdit(row, column, input.value);
-          });
-          td.appendChild(input);
-        }
-
-        tr.appendChild(td);
+        item[column.name] = row.values[column.name];
       }
+      return item;
+    });
+  }
 
-      tbody.appendChild(tr);
-    }
+  function buildColumns(active) {
+    const columns = [];
 
-    table.appendChild(tbody);
-    elements.tableGridWrap.innerHTML = '';
-    elements.tableGridWrap.appendChild(table);
-
-    for (const button of elements.tableGridWrap.querySelectorAll('.headerSort')) {
-      button.addEventListener('click', (event) => {
-        const column = event.currentTarget.dataset.column;
-        toggleSort(column);
+    if (!active.info.readOnly) {
+      columns.push({
+        formatter: 'rowSelection',
+        titleFormatter: 'rowSelection',
+        titleFormatterParams: { rowRange: 'active' },
+        hozAlign: 'center',
+        headerHozAlign: 'center',
+        headerSort: false,
+        width: 44,
+        minWidth: 44,
+        frozen: true,
+        resizable: false,
+        cssClass: 'dbx-select-col',
       });
     }
+
+    for (const column of active.info.columns) {
+      columns.push({
+        title: column.name,
+        field: column.name,
+        headerSort: false,
+        minWidth: 80,
+        hozAlign: columnIsNumeric(column) ? 'right' : 'left',
+        headerTooltip: columnTooltip(column),
+        titleFormatter: () => titleHtml(column, active),
+        formatter: nullableFormatter,
+        editor: 'input',
+        editable: (cell) => {
+          if (!cellEditable(active, column)) {
+            return false;
+          }
+          const row = originalRow(cell);
+          return Boolean(row && row.key);
+        },
+        cellEdited: (cell) => handleCellEdited(active, column, cell),
+        headerClick: () => toggleSort(column.name),
+        headerMenu: buildHeaderMenu(),
+        contextMenu: buildCellMenu(),
+      });
+    }
+
+    return columns;
+  }
+
+  function titleHtml(column, active) {
+    const direction = active.sort && active.sort.column === column.name ? active.sort.direction : '';
+    const arrow = direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '';
+    const flags = [];
+    if (column.isPrimaryKey) {
+      flags.push('PK');
+    } else if (column.isUniqueKey) {
+      flags.push('UQ');
+    }
+    const flagHtml = flags.length ? ` <span class="dbx-col-flag">${flags.join(' ')}</span>` : '';
+    const arrowHtml = arrow ? ` <span class="dbx-sort">${arrow}</span>` : '';
+    return `<span class="dbx-col-name">${escapeHtml(column.name)}</span>${flagHtml}${arrowHtml}`;
+  }
+
+  function columnTooltip(column) {
+    const parts = [column.dataType || 'unknown'];
+    parts.push(column.nullable ? 'NULL' : 'NOT NULL');
+    if (column.isPrimaryKey) {
+      parts.push('primary key');
+    } else if (column.isUniqueKey) {
+      parts.push('unique');
+    }
+    if (column.isAutoIncrement) {
+      parts.push('auto-increment');
+    }
+    return `${column.name} — ${parts.join(' · ')}`;
+  }
+
+  function nullableFormatter(cell) {
+    const value = cell.getValue();
+    if (value === null || value === undefined) {
+      return '<span class="dbx-null">NULL</span>';
+    }
+    return escapeHtml(String(value));
+  }
+
+  function buildHeaderMenu() {
+    return [
+      {
+        label: 'Hide column',
+        action: (event, column) => column.hide(),
+      },
+      {
+        label: 'Freeze / unfreeze column',
+        action: (event, column) => {
+          try {
+            const definition = column.getDefinition();
+            column.updateDefinition(Object.assign({}, definition, { frozen: !definition.frozen }));
+          } catch (error) {
+            showStatus('Column freezing is not available for this column.', true);
+            console.error(error);
+          }
+        },
+      },
+    ];
+  }
+
+  function cellEditable(active, column) {
+    if (active.info.readOnly) {
+      return false;
+    }
+    if (column.isAutoIncrement) {
+      return false;
+    }
+    if (active.info.writableKey.columns.includes(column.name)) {
+      return false;
+    }
+    return true;
+  }
+
+  function originalRow(cell) {
+    if (!state.activeTable) {
+      return undefined;
+    }
+    const data = cell.getRow().getData();
+    return state.activeTable.rows[data._dbx_i];
+  }
+
+  function handleCellEdited(active, column, cell) {
+    const row = originalRow(cell);
+    if (!row) {
+      return;
+    }
+
+    onCellEdit(row, column, cell.getValue());
+
+    const key = rowKeyString(row.key);
+    const edit = key ? state.pendingEdits.get(key) : undefined;
+    const changed = Boolean(edit && Object.prototype.hasOwnProperty.call(edit.changes, column.name));
+    cell.getElement().classList.toggle('dbx-cell-edited', changed);
+
+    updateEditInfo();
   }
 
   function onCellEdit(row, column, rawInput) {
-    if (!row.key) {
+    if (!row.key || !column) {
       return;
     }
 
@@ -484,6 +635,155 @@
     } else {
       state.pendingEdits.set(key, existing);
     }
+  }
+
+  function updateEditInfo() {
+    const count = state.pendingEdits.size;
+    elements.editInfo.textContent = count ? `${count} pending change${count === 1 ? '' : 's'}` : '';
+    const readOnly = !state.activeTable || state.activeTable.info.readOnly;
+    elements.btnApplyEdits.disabled = readOnly || count === 0;
+    elements.btnCancelEdits.disabled = readOnly || count === 0;
+  }
+
+  function updateSelectionButtons() {
+    const active = state.activeTable;
+    const readOnly = !active || active.info.readOnly;
+    const selected = getSelectedOriginalRows();
+    elements.btnDeleteRows.disabled = readOnly || selected.length === 0;
+    elements.btnDuplicateRow.disabled = readOnly || selected.length !== 1;
+  }
+
+  function getSelectedOriginalRows() {
+    if (!state.tabulator || !state.activeTable) {
+      return [];
+    }
+    try {
+      return state.tabulator
+        .getSelectedData()
+        .map((data) => state.activeTable.rows[data._dbx_i])
+        .filter(Boolean);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function buildCellMenu() {
+    return [
+      { label: 'View value', action: (event, cell) => openValueViewer(cell) },
+      { label: 'Copy value', action: (event, cell) => copyCellValue(cell) },
+      { label: 'Filter by this value', action: (event, cell) => filterByCell(cell) },
+    ];
+  }
+
+  function openValueViewer(cell) {
+    elements.valueModalTitle.textContent = `Value · ${cell.getColumn().getField()}`;
+    elements.valueModalBody.textContent = formatValueForViewer(cell.getValue());
+    elements.valueModal.hidden = false;
+  }
+
+  function formatValueForViewer(value) {
+    if (value === null || value === undefined) {
+      return 'NULL';
+    }
+    const str = String(value);
+    const trimmed = str.trim();
+    const looksJson =
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+    if (looksJson) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch (error) {
+        return str;
+      }
+    }
+    return str;
+  }
+
+  async function copyCellValue(cell) {
+    const value = cell.getValue();
+    try {
+      await navigator.clipboard.writeText(value === null || value === undefined ? '' : String(value));
+      showStatus('Cell value copied.');
+    } catch (error) {
+      showStatus('Copy failed.', true);
+      console.error(error);
+    }
+  }
+
+  function filterByCell(cell) {
+    if (!state.activeTable) {
+      return;
+    }
+    const columnName = cell.getColumn().getField();
+    const value = cell.getValue();
+    state.activeTable.filter =
+      value === null || value === undefined
+        ? { column: columnName, operator: 'isNull' }
+        : { column: columnName, operator: 'eq', value };
+    state.activeTable.page = 0;
+    queryActiveTable();
+  }
+
+  function applyFindFilter() {
+    if (!state.tabulator) {
+      return;
+    }
+    const term = elements.findInPage.value.trim().toLowerCase();
+    if (!term) {
+      state.tabulator.clearFilter(true);
+      return;
+    }
+    state.tabulator.setFilter((data) => {
+      for (const key in data) {
+        if (key === '_dbx_i') {
+          continue;
+        }
+        const value = data[key];
+        if (value !== null && value !== undefined && String(value).toLowerCase().includes(term)) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  function updateAggregateStrip() {
+    const active = state.activeTable;
+    if (!active) {
+      elements.aggregateStrip.textContent = '';
+      return;
+    }
+
+    const selected = getSelectedOriginalRows();
+    const rows = selected.length ? selected : active.rows;
+    const scope = selected.length ? `${selected.length} selected` : `${active.rows.length} loaded`;
+    const parts = [`Rows: ${scope}`];
+
+    for (const column of active.info.columns) {
+      if (!columnIsNumeric(column)) {
+        continue;
+      }
+      const numbers = rows
+        .map((row) => row.values[column.name])
+        .filter((value) => value !== null && value !== undefined && value !== '' && !Number.isNaN(Number(value)))
+        .map(Number);
+      if (numbers.length === 0) {
+        continue;
+      }
+      const sum = numbers.reduce((total, value) => total + value, 0);
+      const avg = sum / numbers.length;
+      parts.push(
+        `${column.name}: Σ ${formatAggregate(sum)} · x̄ ${formatAggregate(avg)} · ↓ ${formatAggregate(
+          Math.min(...numbers),
+        )} · ↑ ${formatAggregate(Math.max(...numbers))}`,
+      );
+    }
+
+    elements.aggregateStrip.textContent = parts.join('     ');
+  }
+
+  function formatAggregate(value) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
   }
 
   function toggleSort(column) {
@@ -546,13 +846,22 @@
     });
   }
 
+  function cancelEdits() {
+    state.pendingEdits.clear();
+    if (state.tabulator && state.activeTable) {
+      state.tabulator.setData(buildData(state.activeTable));
+    }
+    updateEditInfo();
+  }
+
   function deleteSelectedRows() {
-    if (!state.activeTable || state.selectedRowKeys.size === 0) {
+    const rows = getSelectedOriginalRows();
+    if (rows.length === 0) {
       showStatus('Select at least one row to delete.', true);
       return;
     }
 
-    const keys = selectedRowObjects();
+    const keys = rows.filter((row) => row.key).map((row) => row.key);
     if (keys.length === 0) {
       showStatus('Selected rows do not have row keys.', true);
       return;
@@ -572,24 +881,14 @@
   }
 
   function duplicateSelectedRow() {
-    if (!state.activeTable) {
-      return;
-    }
-
-    const keys = [...state.selectedRowKeys];
-    if (keys.length !== 1) {
+    const rows = getSelectedOriginalRows();
+    if (rows.length !== 1) {
       showStatus('Select exactly one row to duplicate.', true);
       return;
     }
 
-    const sourceRow = state.activeTable.rows.find((row) => rowKeyString(row.key) === keys[0]);
-    if (!sourceRow) {
-      showStatus('Unable to find selected row.', true);
-      return;
-    }
-
     sendRequest('duplicateRow', {
-      row: sourceRow,
+      row: rows[0],
     });
   }
 
@@ -664,21 +963,6 @@
     elements.btnOpenDdl.disabled = !hasDdl;
   }
 
-  function selectedRowObjects() {
-    if (!state.activeTable) {
-      return [];
-    }
-
-    const keys = [];
-    for (const row of state.activeTable.rows) {
-      const serialized = rowKeyString(row.key);
-      if (serialized && state.selectedRowKeys.has(serialized) && row.key) {
-        keys.push(row.key);
-      }
-    }
-    return keys;
-  }
-
   function rowKeyString(rowKey) {
     if (!rowKey) {
       return '';
@@ -693,6 +977,11 @@
     }
 
     return state.activeTable.info.columns.find((column) => column.name === name);
+  }
+
+  function columnIsNumeric(column) {
+    const lowerType = (column && column.dataType ? column.dataType : '').toLowerCase();
+    return /(int|decimal|numeric|real|float|double|bigint)/.test(lowerType);
   }
 
   function parseInputToScalar(rawInput, column) {
@@ -724,18 +1013,6 @@
     }
 
     return rawInput;
-  }
-
-  function scalarToText(value) {
-    if (value === null || value === undefined) {
-      return 'NULL';
-    }
-
-    if (typeof value === 'object') {
-      return JSON.stringify(value);
-    }
-
-    return String(value);
   }
 
   function scalarEquals(a, b) {

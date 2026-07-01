@@ -101,6 +101,10 @@
       <section class="panel">
         <div class="panelHeader">
           <h2>Connections</h2>
+          <div class="inlineButtons">
+            <button id="btnAddConnection">Add Connection</button>
+            <button id="btnRefreshTree" class="secondary">Refresh</button>
+          </div>
         </div>
         <div id="connectionTree" class="tree"></div>
       </section>
@@ -134,12 +138,16 @@
     clearPasswordWrap: document.getElementById('clearPasswordWrap'),
     mysqlClearPassword: document.getElementById('mysqlClearPassword'),
     connectionTree: document.getElementById('connectionTree'),
+    btnAddConnection: document.getElementById('btnAddConnection'),
+    btnRefreshTree: document.getElementById('btnRefreshTree'),
     statusBar: document.getElementById('statusBar'),
   };
 
   elements.btnCancelConnectionForm.addEventListener('click', () => hideConnectionForm());
   elements.connectionType.addEventListener('change', updateConnectionTypeFields);
   elements.btnBrowseSqlite.addEventListener('click', () => sendRequest('pickSqliteFile'));
+  elements.btnAddConnection.addEventListener('click', () => openConnectionForm('add'));
+  elements.btnRefreshTree.addEventListener('click', () => sendRequest('refreshTree'));
 
   elements.connectionForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -319,7 +327,7 @@
     tree.innerHTML = '';
 
     if (state.tree.length === 0) {
-      tree.textContent = 'No connections yet. Use the + action in the view title to add one.';
+      tree.textContent = 'No connections yet. Click "Add Connection" to create one.';
       return;
     }
 

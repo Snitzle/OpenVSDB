@@ -2,9 +2,9 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "npm: compile",
+      "label": "npm: build",
       "type": "shell",
-      "command": "npm run compile",
+      "command": "npm run build",
       "options": {
         "shell": {
           "executable": "/usr/bin/bash",

@@ -4,6 +4,7 @@ import {
   DbObject,
   DeleteRowsRequest,
   InsertRowRequest,
+  RawQueryResult,
   RowData,
   RowKey,
   Scalar,
@@ -18,6 +19,7 @@ import { chooseWritableKey, UniqueIndexCandidate } from './keyStrategy';
 import { isLockedSqliteError, toScalar } from './valueCodec';
 import { quoteIdentifier, quoteQualifiedIdentifier } from '../sql/identifier';
 import { buildOrderByClause, buildWhereClause } from '../sql/queryFragments';
+import { splitSqlStatements, statementReturnsRows } from '../sql/statements';
 
 const ROWID_ALIAS = '__dbx_rowid';
 
@@ -338,6 +340,45 @@ export class SqliteClient implements DatabaseClient {
     }
 
     return ddl;
+  }
+
+  async executeRaw(sql: string): Promise<RawQueryResult[]> {
+    const statements = splitSqlStatements(sql);
+    const results: RawQueryResult[] = [];
+
+    for (let index = 0; index < statements.length; index += 1) {
+      const statement = statements[index];
+      const started = Date.now();
+
+      if (statementReturnsRows(statement)) {
+        const rows = await this.withRetry(
+          () => this.all<Record<string, unknown>>(statement),
+          'running query',
+        );
+        const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+        const dataRows = rows.map((row) => columns.map((column) => toScalar(row[column])));
+        results.push({
+          statementIndex: index,
+          columns,
+          rows: dataRows,
+          rowCount: dataRows.length,
+          durationMs: Date.now() - started,
+        });
+      } else {
+        const runResult = await this.withRetry(() => this.run(statement), 'running statement');
+        results.push({
+          statementIndex: index,
+          columns: [],
+          rows: [],
+          rowCount: 0,
+          affectedRows: runResult.changes,
+          lastInsertId: runResult.lastID,
+          durationMs: Date.now() - started,
+        });
+      }
+    }
+
+    return results;
   }
 
   private async getPragmaTableInfo(schema: string, table: string): Promise<SqliteTableInfoRow[]> {

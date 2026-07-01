@@ -1,7 +1,8 @@
 :root {
-  --accent: #2b8f78;
-  --accent-soft: #173f37;
-  --danger: #b54d4d;
+  --accent: var(--vscode-button-background, #2b8f78);
+  --accent-fg: var(--vscode-button-foreground, #ffffff);
+  --accent-soft: color-mix(in srgb, var(--vscode-button-background, #2b8f78) 30%, transparent);
+  --danger: var(--vscode-inputValidation-errorBorder, #b54d4d);
   --panel-border: color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
   --space-1: 4px;
   --space-2: 8px;
@@ -29,11 +30,7 @@ body {
 }
 
 body[data-surface='panel'] {
-  background: radial-gradient(
-    circle at top,
-    color-mix(in srgb, var(--vscode-editor-background) 92%, #1f3a34 8%),
-    var(--vscode-editor-background)
-  );
+  background: var(--vscode-editor-background);
 }
 
 button,
@@ -152,7 +149,7 @@ button {
   min-width: 96px;
   padding: 0 var(--control-padding-inline);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -282,11 +279,13 @@ button.small {
   color: #ffb7b7;
 }
 
+.spacer {
+  flex: 1 1 auto;
+}
+
 .gridWrap {
-  overflow: auto;
-  max-height: 420px;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  height: 60vh;
+  min-height: 320px;
 }
 
 body[data-surface='panel'] .root {
@@ -308,8 +307,8 @@ body[data-surface='panel'] .toolbar .inlineButtons {
 }
 
 body[data-surface='panel'] .gridWrap {
+  height: calc(100vh - 360px);
   min-height: 320px;
-  max-height: calc(100vh - 340px);
 }
 
 .grid {
@@ -375,6 +374,17 @@ body[data-surface='panel'] .cellInput {
 
 body[data-surface='panel'] .ddl {
   max-height: 35vh;
+}
+
+.aggregate {
+  padding: var(--space-2) var(--space-1) 0;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.7;
+  min-height: 20px;
+}
+
+.findField {
+  min-width: 180px;
 }
 
 .muted {

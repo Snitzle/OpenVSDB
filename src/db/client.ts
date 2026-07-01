@@ -2,6 +2,7 @@ import {
   DbObject,
   DeleteRowsRequest,
   InsertRowRequest,
+  RawQueryResult,
   TableInfo,
   TableQuery,
   TableQueryResult,
@@ -31,4 +32,11 @@ export interface DatabaseClient {
   deleteRows(request: DeleteRowsRequest): Promise<void>;
 
   getDdl(schema: string, objectName: string, objectType: 'table' | 'view'): Promise<string>;
+
+  /**
+   * Execute an arbitrary SQL script. The script may contain several statements;
+   * each produces one {@link RawQueryResult}. This is the foundation for the SQL
+   * console, "copy as SQL", EXPLAIN, and DDL execution.
+   */
+  executeRaw(sql: string): Promise<RawQueryResult[]>;
 }

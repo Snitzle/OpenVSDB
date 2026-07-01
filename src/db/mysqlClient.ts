@@ -1,12 +1,13 @@
 import * as fs from 'node:fs';
 import * as mysql from 'mysql2/promise';
-import { RowDataPacket } from 'mysql2';
+import { FieldPacket, ResultSetHeader, RowDataPacket } from 'mysql2';
 import {
   ColumnInfo,
   DbObject,
   DeleteRowsRequest,
   InsertRowRequest,
   MySqlConnectionMeta,
+  RawQueryResult,
   RowData,
   RowKey,
   Scalar,
@@ -38,6 +39,7 @@ export class MySqlClient implements DatabaseClient {
       connectionLimit: 5,
       queueLimit: 0,
       decimalNumbers: false,
+      multipleStatements: true,
       ssl: this.buildSslConfig(connection),
     });
   }
@@ -295,6 +297,13 @@ export class MySqlClient implements DatabaseClient {
     return ddl;
   }
 
+  async executeRaw(sql: string): Promise<RawQueryResult[]> {
+    const started = Date.now();
+    const [result, fields] = await this.pool.query(sql);
+    const durationMs = Date.now() - started;
+    return normalizeMysqlResult(result, fields, durationMs);
+  }
+
   private async loadUniqueIndexCandidates(
     schema: string,
     table: string,
@@ -396,4 +405,63 @@ export class MySqlClient implements DatabaseClient {
 
     return sslOptions;
   }
+}
+
+function isResultSetHeader(value: unknown): value is ResultSetHeader {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && 'affectedRows' in (value as object);
+}
+
+function mysqlRowsToRaw(
+  rows: RowDataPacket[],
+  fields: FieldPacket[] | undefined,
+  index: number,
+  durationMs: number,
+): RawQueryResult {
+  const fieldColumns = (fields ?? []).map((field) => field.name);
+  const columns = fieldColumns.length > 0 ? fieldColumns : rows[0] ? Object.keys(rows[0]) : [];
+  const dataRows = rows.map((row) => columns.map((column) => toScalar((row as Record<string, unknown>)[column])));
+
+  return {
+    statementIndex: index,
+    columns,
+    rows: dataRows,
+    rowCount: dataRows.length,
+    durationMs,
+  };
+}
+
+function mysqlHeaderToRaw(header: ResultSetHeader, index: number, durationMs: number): RawQueryResult {
+  return {
+    statementIndex: index,
+    columns: [],
+    rows: [],
+    rowCount: 0,
+    affectedRows: header.affectedRows,
+    lastInsertId: header.insertId ?? undefined,
+    durationMs,
+  };
+}
+
+function normalizeMysqlResult(result: unknown, fields: unknown, durationMs: number): RawQueryResult[] {
+  // Multiple statements: result is an array whose entries are each a row set or a header.
+  if (Array.isArray(result) && result.length > 0 && (Array.isArray(result[0]) || isResultSetHeader(result[0]))) {
+    const fieldGroups = Array.isArray(fields) ? (fields as (FieldPacket[] | undefined)[]) : [];
+    return (result as unknown[]).map((part, index) =>
+      Array.isArray(part)
+        ? mysqlRowsToRaw(part as RowDataPacket[], fieldGroups[index], index, durationMs)
+        : mysqlHeaderToRaw(part as ResultSetHeader, index, durationMs),
+    );
+  }
+
+  // Single data/DDL statement.
+  if (isResultSetHeader(result)) {
+    return [mysqlHeaderToRaw(result, 0, durationMs)];
+  }
+
+  // Single row-producing statement (possibly zero rows, but fields are still present).
+  if (Array.isArray(result)) {
+    return [mysqlRowsToRaw(result as RowDataPacket[], fields as FieldPacket[] | undefined, 0, durationMs)];
+  }
+
+  return [];
 }
