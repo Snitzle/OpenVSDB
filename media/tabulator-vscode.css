@@ -51,6 +51,13 @@
   color: var(--vscode-focusBorder);
 }
 
+.dbx-sort-order {
+  font-size: 9px;
+  vertical-align: super;
+  margin-left: 1px;
+  opacity: 0.85;
+}
+
 /* Rows & cells */
 .tabulator .tabulator-tableholder {
   background: var(--vscode-editor-background);

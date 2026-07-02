@@ -34,15 +34,14 @@ The Database Explorer opens as a **main-window editor tab**, not a sidebar view.
 - [x] Native theming: VS Code theme tokens for controls + grid (`media/tabulator-vscode.css`); removed the hardcoded teal gradient. (Codicons deferred to Stage 1.)
 - [x] Add `executeRaw()` to the client interface + `mysqlClient` (multi-statement) / `sqliteClient` (statement splitter in `src/sql/statements.ts`, unit-tested).
 
-## Stage 1 — Inspect (in progress, 2026-06-23)
+## Stage 1 — Inspect (2026-07-01)
 - [x] "Filter by this value" cell context action (right-click a cell).
 - [x] Cell **value viewer** (right-click → View value): pretty-prints JSON, scrolls for long text; Copy value.
 - [x] **Aggregate strip** under the grid: count + sum/avg/min/max per numeric column, over the selection (or the loaded page).
 - [x] **Find in page**: client-side filter across the loaded rows.
-- [ ] Multi-column sort (needs a backend `ORDER BY` list — `queryFragments.ts`, `TableQuery.sort`).
-- [ ] Raw `WHERE` filter bar (needs `TableQuery.where` threaded through both clients + count query).
-- [ ] Jump-to-page control; image / hex-blob value viewers.
-- Touches: `media/tablePanel.js`, `media/tabulator-vscode.css` (done); `queryFragments.ts`, `types.ts`, `protocol.ts`, both clients (remaining).
+- [x] **Multi-column sort** — shift-click headers; `TableQuery.sort` is now a `SortSpec[]`, `buildOrderByClause` joins the terms, and the header shows priority badges.
+- [x] **Raw `WHERE` filter bar** — a WHERE field in the filter popover that overrides the column filter; `TableQuery.where` + new `buildFilterClause` thread it through both clients including the count query.
+- [ ] Jump-to-page control; image / hex-blob value viewers (minor; deferred).
 
 ## Stage 2 — Change values
 - [ ] Type-aware inline editors (text / number / boolean / date / NULL).

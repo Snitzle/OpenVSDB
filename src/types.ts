@@ -141,8 +141,9 @@ export interface TableQuery {
   table: string;
   page: number;
   pageSize: number;
-  sort?: SortSpec;
+  sort?: SortSpec[];
   filter?: FilterSpec;
+  where?: string;
   includeCount?: boolean;
 }
 

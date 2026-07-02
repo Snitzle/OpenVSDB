@@ -22,6 +22,7 @@ interface ActiveTableState {
   pageSize: number;
   sort?: TableQuery['sort'];
   filter?: TableQuery['filter'];
+  where?: TableQuery['where'];
 }
 
 export class TablePanelManager implements vscode.Disposable {
@@ -186,6 +187,7 @@ class TablePanelInstance implements vscode.Disposable {
             pageSize: Math.max(1, Math.min(500, message.pageSize)),
             sort: message.sort,
             filter: message.filter,
+            where: message.where,
           };
           await this.refreshActiveTable(message.requestId);
           return;
@@ -290,6 +292,7 @@ class TablePanelInstance implements vscode.Disposable {
         pageSize: this.activeTable.pageSize,
         sort: this.activeTable.sort,
         filter: this.activeTable.filter,
+        where: this.activeTable.where,
         includeCount: true,
       },
       this.activeTable.objectType,
@@ -315,6 +318,7 @@ class TablePanelInstance implements vscode.Disposable {
         totalCount: result.totalCount,
         sort: this.activeTable.sort,
         filter: this.activeTable.filter,
+        where: this.activeTable.where,
       },
       requestId,
     );

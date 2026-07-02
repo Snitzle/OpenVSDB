@@ -302,6 +302,20 @@ button.small {
   width: 100%;
 }
 
+.filterBar .whereField {
+  flex: 1 1 100%;
+}
+
+.filterBar .whereField input {
+  width: 100%;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.filterHint {
+  flex: 1 1 100%;
+  font-size: 11px;
+}
+
 .editBar {
   display: flex;
   align-items: center;

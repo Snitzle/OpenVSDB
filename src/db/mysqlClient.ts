@@ -20,7 +20,7 @@ import { DatabaseClient } from './client';
 import { chooseWritableKey, UniqueIndexCandidate } from './keyStrategy';
 import { toScalar } from './valueCodec';
 import { quoteIdentifier, quoteQualifiedIdentifier } from '../sql/identifier';
-import { buildOrderByClause, buildWhereClause } from '../sql/queryFragments';
+import { buildFilterClause, buildOrderByClause } from '../sql/queryFragments';
 
 const SYSTEM_SCHEMAS = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
@@ -138,7 +138,7 @@ export class MySqlClient implements DatabaseClient {
   async queryTableRows(query: TableQuery, objectType: 'table' | 'view'): Promise<TableQueryResult> {
     const info = await this.getTableInfo(query.schema, query.table, objectType);
     const allowedColumns = new Set(info.columns.map((column) => column.name));
-    const where = buildWhereClause('mysql', query.filter, allowedColumns);
+    const where = buildFilterClause('mysql', query, allowedColumns);
     const order = buildOrderByClause('mysql', query.sort, allowedColumns);
     const page = Number.isFinite(query.page) ? Math.max(0, Math.trunc(query.page)) : 0;
     const pageSize = Number.isFinite(query.pageSize) ? Math.max(1, Math.trunc(query.pageSize)) : 50;

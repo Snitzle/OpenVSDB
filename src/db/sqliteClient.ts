@@ -18,7 +18,7 @@ import { DatabaseClient } from './client';
 import { chooseWritableKey, UniqueIndexCandidate } from './keyStrategy';
 import { isLockedSqliteError, toScalar } from './valueCodec';
 import { quoteIdentifier, quoteQualifiedIdentifier } from '../sql/identifier';
-import { buildOrderByClause, buildWhereClause } from '../sql/queryFragments';
+import { buildFilterClause, buildOrderByClause } from '../sql/queryFragments';
 import { splitSqlStatements, statementReturnsRows } from '../sql/statements';
 
 const ROWID_ALIAS = '__dbx_rowid';
@@ -177,7 +177,7 @@ export class SqliteClient implements DatabaseClient {
     const info = await this.getTableInfo(query.schema, query.table, objectType);
 
     const allowedColumns = new Set(info.columns.map((column) => column.name));
-    const where = buildWhereClause('sqlite', query.filter, allowedColumns);
+    const where = buildFilterClause('sqlite', query, allowedColumns);
     const order = buildOrderByClause('sqlite', query.sort, allowedColumns);
 
     const columnSql = info.columns.map((column) => quoteIdentifier('sqlite', column.name));

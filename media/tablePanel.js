@@ -67,6 +67,9 @@ import './tabulator-vscode.css';
           </div>
 
           <div id="filterBar" class="filterBar" hidden>
+            <label class="whereField">WHERE
+              <input id="whereInput" placeholder="raw SQL — e.g. account_role = 'Owner' and events_count = 1" />
+            </label>
             <label>Column
               <select id="filterColumn"></select>
             </label>
@@ -90,6 +93,7 @@ import './tabulator-vscode.css';
             </label>
             <button id="btnApplyFilter" class="secondary">Apply</button>
             <button id="btnClearFilter" class="secondary">Clear</button>
+            <span class="filterHint muted">A raw WHERE overrides the column filter. Shift-click a header to sort by multiple columns.</span>
           </div>
 
           <div id="editBar" class="editBar" hidden>
@@ -163,6 +167,7 @@ import './tabulator-vscode.css';
     filterColumn: document.getElementById('filterColumn'),
     filterOperator: document.getElementById('filterOperator'),
     filterValue: document.getElementById('filterValue'),
+    whereInput: document.getElementById('whereInput'),
     btnApplyFilter: document.getElementById('btnApplyFilter'),
     btnClearFilter: document.getElementById('btnClearFilter'),
     btnAddRow: document.getElementById('btnAddRow'),
@@ -229,17 +234,25 @@ import './tabulator-vscode.css';
       return;
     }
 
-    const operator = elements.filterOperator.value;
-    const filter = {
-      column: elements.filterColumn.value,
-      operator,
-    };
+    const rawWhere = elements.whereInput.value.trim();
+    if (rawWhere) {
+      state.activeTable.where = rawWhere;
+      state.activeTable.filter = undefined;
+    } else {
+      const operator = elements.filterOperator.value;
+      const filter = {
+        column: elements.filterColumn.value,
+        operator,
+      };
 
-    if (operator !== 'isNull' && operator !== 'isNotNull') {
-      filter.value = parseInputToScalar(elements.filterValue.value, getColumnByName(elements.filterColumn.value));
+      if (operator !== 'isNull' && operator !== 'isNotNull') {
+        filter.value = parseInputToScalar(elements.filterValue.value, getColumnByName(elements.filterColumn.value));
+      }
+
+      state.activeTable.filter = filter;
+      state.activeTable.where = undefined;
     }
 
-    state.activeTable.filter = filter;
     state.activeTable.page = 0;
     elements.filterBar.hidden = true;
     elements.btnToggleFilter.setAttribute('aria-pressed', 'false');
@@ -322,12 +335,14 @@ import './tabulator-vscode.css';
           pageSize: message.pageSize,
           sort: message.sort,
           filter: message.filter,
+          where: message.where,
           info: message.info,
           rows: message.rows,
           totalCount: message.totalCount,
         };
         elements.pageSize.value = String(message.pageSize);
         elements.findInPage.value = '';
+        elements.whereInput.value = message.where || '';
         state.pendingEdits.clear();
         renderMeta();
         renderGrid();
@@ -402,13 +417,22 @@ import './tabulator-vscode.css';
       return;
     }
     state.activeTable.filter = undefined;
+    state.activeTable.where = undefined;
     elements.filterValue.value = '';
+    elements.whereInput.value = '';
     state.activeTable.page = 0;
     queryActiveTable();
   }
 
   function updateFilterChip() {
-    const filter = state.activeTable && state.activeTable.filter;
+    const active = state.activeTable;
+    if (active && active.where) {
+      elements.filterChip.hidden = false;
+      elements.filterChip.title = 'Clear filter';
+      elements.filterChip.textContent = `WHERE ${active.where}  ✕`;
+      return;
+    }
+    const filter = active && active.filter;
     if (!filter) {
       elements.filterChip.hidden = true;
       elements.filterChip.textContent = '';
@@ -564,7 +588,7 @@ import './tabulator-vscode.css';
           return Boolean(row && row.key);
         },
         cellEdited: (cell) => handleCellEdited(active, column, cell),
-        headerClick: () => toggleSort(column.name),
+        headerClick: (event) => toggleSort(column.name, event.shiftKey),
         headerMenu: buildHeaderMenu(),
         contextMenu: buildCellMenu(),
       });
@@ -574,8 +598,8 @@ import './tabulator-vscode.css';
   }
 
   function titleHtml(column, active) {
-    const direction = active.sort && active.sort.column === column.name ? active.sort.direction : '';
-    const arrow = direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '';
+    const sort = Array.isArray(active.sort) ? active.sort : [];
+    const index = sort.findIndex((spec) => spec.column === column.name);
     const flags = [];
     if (column.isPrimaryKey) {
       flags.push('PK');
@@ -583,7 +607,12 @@ import './tabulator-vscode.css';
       flags.push('UQ');
     }
     const flagHtml = flags.length ? ` <span class="dbx-col-flag">${flags.join(' ')}</span>` : '';
-    const arrowHtml = arrow ? ` <span class="dbx-sort">${arrow}</span>` : '';
+    let arrowHtml = '';
+    if (index !== -1) {
+      const arrow = sort[index].direction === 'asc' ? '▲' : '▼';
+      const order = sort.length > 1 ? `<span class="dbx-sort-order">${index + 1}</span>` : '';
+      arrowHtml = ` <span class="dbx-sort">${arrow}${order}</span>`;
+    }
     return `<span class="dbx-col-name">${escapeHtml(column.name)}</span>${flagHtml}${arrowHtml}`;
   }
 
@@ -778,6 +807,8 @@ import './tabulator-vscode.css';
       value === null || value === undefined
         ? { column: columnName, operator: 'isNull' }
         : { column: columnName, operator: 'eq', value };
+    state.activeTable.where = undefined;
+    elements.whereInput.value = '';
     state.activeTable.page = 0;
     queryActiveTable();
   }
@@ -844,20 +875,33 @@ import './tabulator-vscode.css';
     return Number.isInteger(value) ? String(value) : value.toFixed(2);
   }
 
-  function toggleSort(column) {
+  function toggleSort(column, additive) {
     if (!state.activeTable || !column) {
       return;
     }
 
-    const existing = state.activeTable.sort;
-    if (!existing || existing.column !== column) {
-      state.activeTable.sort = { column, direction: 'asc' };
-    } else if (existing.direction === 'asc') {
-      state.activeTable.sort = { column, direction: 'desc' };
+    const current = Array.isArray(state.activeTable.sort) ? state.activeTable.sort.slice() : [];
+    const index = current.findIndex((spec) => spec.column === column);
+
+    let next;
+    if (additive) {
+      next = current;
+      if (index === -1) {
+        next.push({ column, direction: 'asc' });
+      } else if (next[index].direction === 'asc') {
+        next[index] = { column, direction: 'desc' };
+      } else {
+        next.splice(index, 1);
+      }
+    } else if (index === -1 || current.length !== 1) {
+      next = [{ column, direction: 'asc' }];
+    } else if (current[0].direction === 'asc') {
+      next = [{ column, direction: 'desc' }];
     } else {
-      state.activeTable.sort = undefined;
+      next = [];
     }
 
+    state.activeTable.sort = next.length ? next : undefined;
     state.activeTable.page = 0;
     queryActiveTable();
   }
@@ -881,6 +925,7 @@ import './tabulator-vscode.css';
       pageSize: state.activeTable.pageSize,
       sort: state.activeTable.sort,
       filter: state.activeTable.filter,
+      where: state.activeTable.where,
     });
   }
 

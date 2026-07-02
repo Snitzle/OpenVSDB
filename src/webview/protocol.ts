@@ -50,8 +50,9 @@ export type TablePanelRequest =
       kind: 'queryTableRows';
       page: number;
       pageSize: number;
-      sort?: SortSpec;
+      sort?: SortSpec[];
       filter?: FilterSpec;
+      where?: string;
     } & RequestBase)
   | ({ kind: 'insertRow'; payload: InsertRowRequest } & RequestBase)
   | ({ kind: 'duplicateRow'; row: RowData } & RequestBase)
@@ -69,8 +70,9 @@ export type TablePanelEvent =
       page: number;
       pageSize: number;
       totalCount?: number;
-      sort?: SortSpec;
+      sort?: SortSpec[];
       filter?: FilterSpec;
+      where?: string;
     } & EventBase)
   | ({
       kind: 'ddl';
