@@ -3,8 +3,12 @@
   "displayName": "OpenVSDB",
   "description": "Browse and edit MySQL and SQLite databases from a VS Code sidebar tree and editor tabs.",
   "version": "0.0.1",
-  "publisher": "local",
-  "license": "MIT",
+  "publisher": "Craig Jones",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Snitzle/OpenVSDB.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
