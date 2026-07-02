@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 import { DbClientManager } from '../db/clientManager';
+import { testConnection } from '../db/testConnection';
 import { exportDatabaseDump } from '../export/exportService';
+import { splitSqlStatements } from '../sql/statements';
 import { ConnectionStore } from '../state/connectionStore';
 import { ConnectionInput, ConnectionMeta, ConnectionTreeNode } from '../types';
 import { SidebarExtensionEvent, SidebarWebviewRequest } from './protocol';
+import { QueryPanelManager } from './queryPanelManager';
 import { TablePanelManager } from './tablePanelManager';
 import { renderWebviewHtml, toUserError } from './utils';
 
@@ -26,6 +29,7 @@ export class ExplorerViewProvider implements vscode.WebviewViewProvider, vscode.
     private readonly connectionStore: ConnectionStore,
     private readonly clientManager: DbClientManager,
     private readonly tablePanels: TablePanelManager,
+    private readonly queryPanels: QueryPanelManager,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -131,6 +135,27 @@ export class ExplorerViewProvider implements vscode.WebviewViewProvider, vscode.
           await this.exportDatabase(message.connectionId, message.requestId);
           return;
 
+        case 'importSql':
+          await this.importSql(message.connectionId, message.requestId);
+          return;
+
+        case 'openQueryPanel':
+          await this.queryPanels.openQueryPanel(message.connectionId);
+          return;
+
+        case 'testConnection': {
+          const result = await testConnection(message.connection, () =>
+            message.connection.type === 'mysql' && message.connection.id
+              ? this.connectionStore.getMySqlPassword(message.connection.id)
+              : Promise.resolve(undefined),
+          );
+          this.postEvent(
+            { kind: 'testConnectionResult', ok: result.ok, message: result.message },
+            message.requestId,
+          );
+          return;
+        }
+
         case 'openTable':
           await this.tablePanels.openTable({
             connectionId: message.connectionId,
@@ -227,6 +252,7 @@ export class ExplorerViewProvider implements vscode.WebviewViewProvider, vscode.
     await this.connectionStore.removeConnection(connectionId);
     await this.clientManager.invalidate(connectionId);
     this.tablePanels.closeConnectionPanels(connectionId);
+    this.queryPanels.closeConnectionPanels(connectionId);
 
     this.postEvent({ kind: 'info', message: 'Connection removed.' }, requestId);
     await this.postState(requestId);
@@ -239,6 +265,59 @@ export class ExplorerViewProvider implements vscode.WebviewViewProvider, vscode.
     }
 
     this.postEvent({ kind: 'connectionSelectedForEdit', connection }, requestId);
+  }
+
+  private async importSql(connectionId: string, requestId?: string): Promise<void> {
+    const connection = await this.connectionStore.getConnection(connectionId);
+    if (!connection) {
+      throw new Error('Connection not found.');
+    }
+
+    const selected = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: 'Import SQL',
+      filters: { SQL: ['sql'], 'All Files': ['*'] },
+    });
+    const fileUri = selected?.[0];
+    if (!fileUri) {
+      return;
+    }
+
+    const bytes = await vscode.workspace.fs.readFile(fileUri);
+    const sql = Buffer.from(bytes).toString('utf8');
+    const statementCount = splitSqlStatements(sql).length;
+    if (statementCount === 0) {
+      this.postEvent({ kind: 'info', message: 'The selected file contains no SQL statements.' }, requestId);
+      return;
+    }
+
+    const fileName = fileUri.path.split('/').pop() ?? 'file';
+    const choice = await vscode.window.showWarningMessage(
+      `Run ${statementCount} statement${statementCount === 1 ? '' : 's'} from "${fileName}" against "${connection.name}"? This may modify data and cannot be undone.`,
+      { modal: true },
+      'Run',
+    );
+    if (choice !== 'Run') {
+      return;
+    }
+
+    const client = await this.clientManager.getClient(connectionId);
+    const results = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Importing ${fileName} into "${connection.name}"…` },
+      () => client.executeRaw(sql),
+    );
+
+    const affected = results.reduce((total, result) => total + (result.affectedRows ?? 0), 0);
+    this.postEvent(
+      {
+        kind: 'info',
+        message: `Import finished: ${results.length} statement${results.length === 1 ? '' : 's'}, ${affected} row${affected === 1 ? '' : 's'} affected.`,
+      },
+      requestId,
+    );
+
+    // New tables/data may exist now.
+    await Promise.all([this.postState(requestId), this.tablePanels.refreshConnection(connectionId)]);
   }
 
   private async exportDatabase(connectionId: string, requestId?: string): Promise<void> {

@@ -5,6 +5,7 @@ import {
   DeleteRowsRequest,
   InsertRowRequest,
   FilterSpec,
+  RawQueryResult,
   RowData,
   SortSpec,
   TableInfo,
@@ -30,7 +31,10 @@ export type SidebarWebviewRequest =
       pageSize: number;
     } & RequestBase)
   | ({ kind: 'selectConnectionForEdit'; connectionId: string } & RequestBase)
-  | ({ kind: 'exportDatabase'; connectionId: string } & RequestBase);
+  | ({ kind: 'exportDatabase'; connectionId: string } & RequestBase)
+  | ({ kind: 'importSql'; connectionId: string } & RequestBase)
+  | ({ kind: 'openQueryPanel'; connectionId: string } & RequestBase)
+  | ({ kind: 'testConnection'; connection: ConnectionInput } & RequestBase);
 
 export interface EventBase {
   requestId?: string;
@@ -41,6 +45,7 @@ export type SidebarExtensionEvent =
   | ({ kind: 'sqliteFilePicked'; filePath?: string } & EventBase)
   | ({ kind: 'connectionSelectedForEdit'; connection: ConnectionMeta } & EventBase)
   | ({ kind: 'triggerAddConnection' } & EventBase)
+  | ({ kind: 'testConnectionResult'; ok: boolean; message: string } & EventBase)
   | ({ kind: 'info'; message: string } & EventBase)
   | ({ kind: 'error'; message: string; details?: string } & EventBase);
 
@@ -86,4 +91,13 @@ export type TablePanelEvent =
     } & EventBase)
   | ({ kind: 'mutationApplied'; message: string } & EventBase)
   | ({ kind: 'info'; message: string } & EventBase)
+  | ({ kind: 'error'; message: string; details?: string } & EventBase);
+
+export type QueryPanelRequest =
+  | ({ kind: 'ready' } & RequestBase)
+  | ({ kind: 'runQuery'; sql: string } & RequestBase);
+
+export type QueryPanelEvent =
+  | ({ kind: 'queryConfig'; connectionName: string; dialect: 'mysql' | 'sqlite' } & EventBase)
+  | ({ kind: 'queryResults'; results: RawQueryResult[] } & EventBase)
   | ({ kind: 'error'; message: string; details?: string } & EventBase);

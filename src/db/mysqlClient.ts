@@ -24,23 +24,84 @@ import { buildFilterClause, buildOrderByClause } from '../sql/queryFragments';
 
 const SYSTEM_SCHEMAS = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
+/** Connection fields shared by saved metas and yet-unsaved form input. */
+export interface MySqlTarget {
+  host: string;
+  port: number;
+  user: string;
+  database: string;
+  ssl?: MySqlConnectionMeta['ssl'];
+  allowClearTextAuth?: boolean;
+}
+
+/**
+ * Base mysql2 options for a target — shared between the long-lived pool and
+ * the one-shot test-connection path so both authenticate identically.
+ */
+export function buildMySqlConnectionOptions(
+  target: MySqlTarget,
+  password: string | undefined,
+): mysql.ConnectionOptions {
+  const options: mysql.ConnectionOptions = {
+    host: target.host,
+    port: target.port,
+    user: target.user,
+    password,
+    database: target.database,
+    decimalNumbers: false,
+    multipleStatements: true,
+    ssl: buildMySqlSslConfig(target),
+  };
+
+  if (target.allowClearTextAuth) {
+    // mysql_clear_password sends the password as a null-terminated string; it
+    // is required by LDAP/PAM-backed servers and must be opted into.
+    options.authPlugins = {
+      mysql_clear_password: () => () => Buffer.from(`${password ?? ''}\0`, 'utf8'),
+    };
+  }
+
+  return options;
+}
+
+function buildMySqlSslConfig(target: MySqlTarget): mysql.ConnectionOptions['ssl'] {
+  if (!target.ssl?.enabled) {
+    return undefined;
+  }
+
+  const sslOptions: Record<string, unknown> = {
+    rejectUnauthorized: target.ssl.rejectUnauthorized,
+  };
+
+  if (target.ssl.caPath) {
+    sslOptions.ca = fs.readFileSync(target.ssl.caPath, 'utf8');
+  }
+
+  if (target.ssl.certPath) {
+    sslOptions.cert = fs.readFileSync(target.ssl.certPath, 'utf8');
+  }
+
+  if (target.ssl.keyPath) {
+    sslOptions.key = fs.readFileSync(target.ssl.keyPath, 'utf8');
+  }
+
+  if (target.ssl.serverName) {
+    sslOptions.servername = target.ssl.serverName;
+  }
+
+  return sslOptions as mysql.ConnectionOptions['ssl'];
+}
+
 export class MySqlClient implements DatabaseClient {
   public readonly dialect = 'mysql' as const;
   private readonly pool: mysql.Pool;
 
   constructor(private readonly connection: MySqlConnectionMeta, password: string | undefined) {
     this.pool = mysql.createPool({
-      host: connection.host,
-      port: connection.port,
-      user: connection.user,
-      password,
-      database: connection.database,
+      ...buildMySqlConnectionOptions(connection, password),
       waitForConnections: true,
       connectionLimit: 5,
       queueLimit: 0,
-      decimalNumbers: false,
-      multipleStatements: true,
-      ssl: this.buildSslConfig(connection),
     });
   }
 
@@ -378,33 +439,6 @@ export class MySqlClient implements DatabaseClient {
     };
   }
 
-  private buildSslConfig(connection: MySqlConnectionMeta): Record<string, unknown> | undefined {
-    if (!connection.ssl?.enabled) {
-      return undefined;
-    }
-
-    const sslOptions: Record<string, unknown> = {
-      rejectUnauthorized: connection.ssl.rejectUnauthorized,
-    };
-
-    if (connection.ssl.caPath) {
-      sslOptions.ca = fs.readFileSync(connection.ssl.caPath, 'utf8');
-    }
-
-    if (connection.ssl.certPath) {
-      sslOptions.cert = fs.readFileSync(connection.ssl.certPath, 'utf8');
-    }
-
-    if (connection.ssl.keyPath) {
-      sslOptions.key = fs.readFileSync(connection.ssl.keyPath, 'utf8');
-    }
-
-    if (connection.ssl.serverName) {
-      sslOptions.servername = connection.ssl.serverName;
-    }
-
-    return sslOptions;
-  }
 }
 
 function isResultSetHeader(value: unknown): value is ResultSetHeader {

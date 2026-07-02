@@ -102,6 +102,24 @@ h2 {
   align-items: start;
 }
 
+/* Vertical rhythm for stacked form sections (connection modal). */
+.fieldStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.formDetails > summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  padding: var(--space-1) 0;
+}
+
+.formDetails[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -831,6 +849,58 @@ body[data-surface='panel'] .ddl {
 
 .status.error {
   color: #ffb5b5;
+}
+
+.status.success {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+/* Query panel */
+.queryRoot {
+  height: 100vh;
+}
+
+.sqlEditor {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 140px;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.queryResults {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.resultSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.resultMeta {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+
+.resultSummary {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 90%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.queryHint {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
 }
 
 .modal {

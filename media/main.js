@@ -44,7 +44,7 @@ import { getVsCodeApi } from './vscodeApi.js';
           <button id="btnCancelConnectionForm" class="secondary">Close</button>
         </div>
 
-        <form id="connectionForm">
+        <form id="connectionForm" class="fieldStack">
           <div class="formGrid">
             <label>Type
               <select id="connectionType">
@@ -57,7 +57,7 @@ import { getVsCodeApi } from './vscodeApi.js';
             </label>
           </div>
 
-          <div id="sqliteFields">
+          <div id="sqliteFields" class="fieldStack">
             <label>SQLite File
               <div class="inlineInput">
                 <input id="sqliteFilePath" placeholder="/path/to/database.sqlite" />
@@ -66,7 +66,7 @@ import { getVsCodeApi } from './vscodeApi.js';
             </label>
           </div>
 
-          <div id="mysqlFields" hidden>
+          <div id="mysqlFields" class="fieldStack" hidden>
             <div class="formGrid">
               <label>Host
                 <input id="mysqlHost" placeholder="127.0.0.1" />
@@ -85,7 +85,11 @@ import { getVsCodeApi } from './vscodeApi.js';
               </label>
             </div>
 
-            <details>
+            <label class="checkboxField" title="Sends the password as clear text over the (ideally TLS-secured) connection — required by LDAP/PAM-backed MySQL servers.">
+              <input id="mysqlAllowClearText" type="checkbox" /> Allow cleartext authentication
+            </label>
+
+            <details class="formDetails">
               <summary>SSL (optional)</summary>
               <div class="formGrid">
                 <label class="checkboxField">
@@ -114,8 +118,11 @@ import { getVsCodeApi } from './vscodeApi.js';
           </div>
 
           <div class="actions">
+            <button type="button" id="btnTestConnection" class="secondary">Test connection</button>
+            <span class="spacer"></span>
             <button type="submit" id="btnSaveConnection">Save connection</button>
           </div>
+          <div id="testConnectionStatus" class="status" hidden></div>
         </form>
         </div>
       </div>
@@ -148,6 +155,7 @@ import { getVsCodeApi } from './vscodeApi.js';
     mysqlUser: document.getElementById('mysqlUser'),
     mysqlPassword: document.getElementById('mysqlPassword'),
     mysqlDatabase: document.getElementById('mysqlDatabase'),
+    mysqlAllowClearText: document.getElementById('mysqlAllowClearText'),
     mysqlSslEnabled: document.getElementById('mysqlSslEnabled'),
     mysqlSslRejectUnauthorized: document.getElementById('mysqlSslRejectUnauthorized'),
     mysqlSslCaPath: document.getElementById('mysqlSslCaPath'),
@@ -158,6 +166,8 @@ import { getVsCodeApi } from './vscodeApi.js';
     mysqlClearPassword: document.getElementById('mysqlClearPassword'),
     connectionTree: document.getElementById('connectionTree'),
     objectFilter: document.getElementById('objectFilter'),
+    btnTestConnection: document.getElementById('btnTestConnection'),
+    testConnectionStatus: document.getElementById('testConnectionStatus'),
     statusBar: document.getElementById('statusBar'),
   };
 
@@ -166,6 +176,13 @@ import { getVsCodeApi } from './vscodeApi.js';
   elements.btnCancelConnectionForm.addEventListener('click', () => hideConnectionForm());
   elements.connectionType.addEventListener('change', updateConnectionTypeFields);
   elements.btnBrowseSqlite.addEventListener('click', () => sendRequest('pickSqliteFile'));
+  elements.btnTestConnection.addEventListener('click', () => {
+    elements.btnTestConnection.disabled = true;
+    elements.testConnectionStatus.hidden = false;
+    elements.testConnectionStatus.classList.remove('error', 'success');
+    elements.testConnectionStatus.textContent = 'Testing connection…';
+    sendRequest('testConnection', { connection: collectConnectionInput() });
+  });
   elements.objectFilter.value = state.filterTerm;
   elements.objectFilter.addEventListener('input', () => {
     state.filterTerm = elements.objectFilter.value;
@@ -220,6 +237,14 @@ import { getVsCodeApi } from './vscodeApi.js';
         openConnectionForm('edit', message.connection);
         break;
 
+      case 'testConnectionResult':
+        elements.btnTestConnection.disabled = false;
+        elements.testConnectionStatus.hidden = false;
+        elements.testConnectionStatus.classList.toggle('error', !message.ok);
+        elements.testConnectionStatus.classList.toggle('success', message.ok);
+        elements.testConnectionStatus.textContent = message.message;
+        break;
+
       case 'info':
         showStatus(message.message);
         break;
@@ -250,6 +275,10 @@ import { getVsCodeApi } from './vscodeApi.js';
     elements.connectionFormTitle.textContent = mode === 'add' ? 'Add connection' : 'Edit connection';
     elements.connectionFormPanel.hidden = false;
     elements.clearPasswordWrap.hidden = mode !== 'edit';
+    elements.btnTestConnection.disabled = false;
+    elements.testConnectionStatus.hidden = true;
+    elements.testConnectionStatus.textContent = '';
+    elements.testConnectionStatus.classList.remove('error', 'success');
 
     if (!connection) {
       elements.connectionType.value = 'sqlite';
@@ -260,6 +289,7 @@ import { getVsCodeApi } from './vscodeApi.js';
       elements.mysqlUser.value = '';
       elements.mysqlPassword.value = '';
       elements.mysqlDatabase.value = '';
+      elements.mysqlAllowClearText.checked = false;
       elements.mysqlSslEnabled.checked = false;
       elements.mysqlSslRejectUnauthorized.checked = true;
       elements.mysqlSslCaPath.value = '';
@@ -282,6 +312,7 @@ import { getVsCodeApi } from './vscodeApi.js';
       elements.mysqlUser.value = connection.user;
       elements.mysqlPassword.value = '';
       elements.mysqlDatabase.value = connection.database;
+      elements.mysqlAllowClearText.checked = Boolean(connection.allowClearTextAuth);
       elements.mysqlSslEnabled.checked = Boolean(connection.ssl && connection.ssl.enabled);
       elements.mysqlSslRejectUnauthorized.checked =
         connection.ssl && connection.ssl.rejectUnauthorized !== undefined
@@ -311,51 +342,48 @@ import { getVsCodeApi } from './vscodeApi.js';
     elements.mysqlFields.hidden = isSqlite;
   }
 
-  function saveConnectionFromForm() {
-    const type = elements.connectionType.value;
-    const mode = state.connectionForm.mode;
-
-    if (type === 'sqlite') {
-      sendRequest('saveConnection', {
-        mode,
-        connection: {
-          id: state.connectionForm.editingId,
-          type: 'sqlite',
-          name: elements.connectionName.value.trim(),
-          filePath: elements.sqliteFilePath.value.trim(),
-        },
-      });
-      hideConnectionForm();
-      return;
+  function collectConnectionInput() {
+    if (elements.connectionType.value === 'sqlite') {
+      return {
+        id: state.connectionForm.editingId,
+        type: 'sqlite',
+        name: elements.connectionName.value.trim(),
+        filePath: elements.sqliteFilePath.value.trim(),
+      };
     }
 
     const sslEnabled = elements.mysqlSslEnabled.checked;
+    return {
+      id: state.connectionForm.editingId,
+      type: 'mysql',
+      name: elements.connectionName.value.trim(),
+      host: elements.mysqlHost.value.trim(),
+      port: Number(elements.mysqlPort.value || 3306),
+      user: elements.mysqlUser.value.trim(),
+      password: elements.mysqlPassword.value,
+      clearPassword: elements.mysqlClearPassword.checked,
+      database: elements.mysqlDatabase.value.trim(),
+      allowClearTextAuth: elements.mysqlAllowClearText.checked,
+      ssl: sslEnabled
+        ? {
+            enabled: true,
+            rejectUnauthorized: elements.mysqlSslRejectUnauthorized.checked,
+            caPath: normalizeOptional(elements.mysqlSslCaPath.value),
+            certPath: normalizeOptional(elements.mysqlSslCertPath.value),
+            keyPath: normalizeOptional(elements.mysqlSslKeyPath.value),
+            serverName: normalizeOptional(elements.mysqlSslServerName.value),
+          }
+        : {
+            enabled: false,
+            rejectUnauthorized: true,
+          },
+    };
+  }
+
+  function saveConnectionFromForm() {
     sendRequest('saveConnection', {
-      mode,
-      connection: {
-        id: state.connectionForm.editingId,
-        type: 'mysql',
-        name: elements.connectionName.value.trim(),
-        host: elements.mysqlHost.value.trim(),
-        port: Number(elements.mysqlPort.value || 3306),
-        user: elements.mysqlUser.value.trim(),
-        password: elements.mysqlPassword.value,
-        clearPassword: elements.mysqlClearPassword.checked,
-        database: elements.mysqlDatabase.value.trim(),
-        ssl: sslEnabled
-          ? {
-              enabled: true,
-              rejectUnauthorized: elements.mysqlSslRejectUnauthorized.checked,
-              caPath: normalizeOptional(elements.mysqlSslCaPath.value),
-              certPath: normalizeOptional(elements.mysqlSslCertPath.value),
-              keyPath: normalizeOptional(elements.mysqlSslKeyPath.value),
-              serverName: normalizeOptional(elements.mysqlSslServerName.value),
-            }
-          : {
-              enabled: false,
-              rejectUnauthorized: true,
-            },
-      },
+      mode: state.connectionForm.mode,
+      connection: collectConnectionInput(),
     });
     hideConnectionForm();
   }
@@ -401,6 +429,16 @@ import { getVsCodeApi } from './vscodeApi.js';
 
       const menuItems = [];
       if (connection.status === 'connected') {
+        menuItems.push({
+          label: 'New query',
+          icon: 'codicon-terminal',
+          onSelect: () => sendRequest('openQueryPanel', { connectionId: connection.connectionId }),
+        });
+        menuItems.push({
+          label: 'Import SQL file…',
+          icon: 'codicon-cloud-upload',
+          onSelect: () => sendRequest('importSql', { connectionId: connection.connectionId }),
+        });
         menuItems.push({
           label: 'Export database',
           icon: 'codicon-desktop-download',

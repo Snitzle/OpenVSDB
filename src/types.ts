@@ -22,6 +22,8 @@ export interface MySqlConnectionMeta extends BaseConnectionMeta {
   user: string;
   database: string;
   ssl?: MySqlSslOptions;
+  /** Enable the mysql_clear_password auth plugin (LDAP/PAM-backed servers). */
+  allowClearTextAuth?: boolean;
 }
 
 export interface SqliteConnectionMeta extends BaseConnectionMeta {
@@ -42,6 +44,7 @@ export interface MySqlConnectionInput {
   clearPassword?: boolean;
   database: string;
   ssl?: MySqlSslOptions;
+  allowClearTextAuth?: boolean;
 }
 
 export interface SqliteConnectionInput {

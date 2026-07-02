@@ -57,6 +57,7 @@ export class ConnectionStore {
       user: input.user,
       database: input.database,
       ssl: input.ssl,
+      allowClearTextAuth: input.allowClearTextAuth,
     };
 
     await this.updateConnectionList(items, meta);

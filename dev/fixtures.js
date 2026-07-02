@@ -253,6 +253,24 @@
       case 'exportDatabase':
         return [{ kind: 'info', message: '[harness] Would export the database as a SQL dump.' }];
 
+      case 'importSql':
+        return [{ kind: 'info', message: '[harness] Would import a SQL file (host-side dialog).' }];
+
+      case 'openQueryPanel':
+        return [{ kind: 'info', message: '[harness] Would open a query panel — see dev/query.html.' }];
+
+      case 'testConnection': {
+        const conn = message.connection;
+        if (conn.type === 'sqlite') {
+          return conn.filePath
+            ? [{ kind: 'testConnectionResult', ok: true, message: 'Connected — SQLite 3.45.1.' }]
+            : [{ kind: 'testConnectionResult', ok: false, message: 'SQLite database file is required.' }];
+        }
+        return conn.host === 'db.internal'
+          ? [{ kind: 'testConnectionResult', ok: false, message: 'MySQL connection refused. Check host, port, and network access.' }]
+          : [{ kind: 'testConnectionResult', ok: true, message: 'Connected — MySQL server 8.4.0.' }];
+      }
+
       case 'saveConnection':
         return [{ kind: 'info', message: `[harness] Connection "${message.connection.name}" saved (not persisted).` }, treeState()];
 
@@ -264,6 +282,52 @@
     }
   }
 
-  window.__dbxMockResponder = (message) =>
-    window.__dbxSurface === 'explorer' ? handleExplorerMessage(message) : handleTableMessage(message);
+  function handleQueryMessage(message) {
+    switch (message.kind) {
+      case 'ready':
+        return [{ kind: 'queryConfig', connectionName: 'Eventwise Mobile', dialect: 'sqlite' }];
+
+      case 'runQuery': {
+        const statements = message.sql
+          .split(';')
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        const results = statements.map((statement, index) => {
+          if (/^(select|pragma|with|show|explain|values)\b/i.test(statement)) {
+            const subset = rows.slice(0, 20);
+            return {
+              statementIndex: index,
+              columns: ['id', 'name', 'email', 'role', 'score'],
+              rows: subset.map((r) => [r.id, r.name, r.email, r.role, r.score]),
+              rowCount: subset.length,
+              durationMs: 3 + index,
+            };
+          }
+          return {
+            statementIndex: index,
+            columns: [],
+            rows: [],
+            rowCount: 0,
+            affectedRows: 3,
+            lastInsertId: nextId,
+            durationMs: 2 + index,
+          };
+        });
+
+        return results.length
+          ? [{ kind: 'queryResults', results }]
+          : [{ kind: 'error', message: 'Nothing to run.' }];
+      }
+
+      default:
+        return [{ kind: 'info', message: `[harness] Unhandled request: ${message.kind}` }];
+    }
+  }
+
+  window.__dbxMockResponder = (message) => {
+    if (window.__dbxSurface === 'explorer') return handleExplorerMessage(message);
+    if (window.__dbxSurface === 'query') return handleQueryMessage(message);
+    return handleTableMessage(message);
+  };
 })();

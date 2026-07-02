@@ -4,13 +4,15 @@ import * as vscode from 'vscode';
 import { DbClientManager } from './db/clientManager';
 import { ConnectionStore } from './state/connectionStore';
 import { ExplorerViewProvider } from './webview/explorerPanel';
+import { QueryPanelManager } from './webview/queryPanelManager';
 import { TablePanelManager } from './webview/tablePanelManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context);
   const clientManager = new DbClientManager(connectionStore);
   const tablePanels = new TablePanelManager(context, connectionStore, clientManager);
-  const explorer = new ExplorerViewProvider(context, connectionStore, clientManager, tablePanels);
+  const queryPanels = new QueryPanelManager(context, connectionStore, clientManager, tablePanels);
+  const explorer = new ExplorerViewProvider(context, connectionStore, clientManager, tablePanels, queryPanels);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ExplorerViewProvider.viewId, explorer, {
@@ -42,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
         debounce = setTimeout(() => {
           explorer.reloadWebview();
           tablePanels.reloadWebviews();
+          queryPanels.reloadWebviews();
         }, 300);
       });
 
@@ -60,6 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
     new vscode.Disposable(() => {
       explorer.dispose();
       tablePanels.dispose();
+      queryPanels.dispose();
       void clientManager.disposeAll();
     }),
   );

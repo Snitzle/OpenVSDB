@@ -2,94 +2,42 @@
 
 ## Context
 
-The maintainer migrated from IntelliJ/DataGrip and most misses its database integration. The extension today is a competent **MySQL + SQLite table browser/editor**: a webview sidebar tree, a table panel with paginated data, inline CRUD with transactions, and view-only DDL — all hand-rolled vanilla JS with no bundler.
+The maintainer migrated from IntelliJ/DataGrip and most misses its database integration. OpenVSDB is a MySQL + SQLite browser/editor: a sidebar webview explorer, Tabulator-based table grids in editor tabs, inline CRUD with transactions, multi-filter querying, and multi-format export. Daily workflows it serves: **inspect, change values, run queries, import, export**.
 
-This roadmap reorganizes work **UX-first** around the five workflows actually used day to day — **inspect, change values, export, import, run queries** — and defers broader DataGrip parity until those are excellent.
+## Architecture snapshot
 
-The driving insight: **one great data grid is the backbone of four of the five workflows.** Inspect, edit, export, and query-results all render rows in a grid, so we build the grid + native theming first and every workflow inherits that quality.
+- **Explorer** — sidebar `WebviewViewProvider` (`dbExplorer.home`), persists tree state via webview `setState`; per-connection actions in a kebab menu.
+- **Table grid** — `TablePanelManager` + `media/tablePanel.js` (Tabulator, VS Code-themed via `media/tabulator-vscode.css`); rebuildless data refreshes (`replaceData`), multi-filter chips ANDed with a raw WHERE.
+- **Clients** — `DatabaseClient` interface over `mysqlClient` / `sqliteClient`; `executeRaw()` runs multi-statement scripts and is the foundation for query panel, SQL import, and dumps.
+- **Export** — `src/export/extractors.ts` (CSV/TSV/JSON/SQL/Markdown, unit-tested) + `exportService.ts` QuickPick flows; whole-DB SQL dump.
+- **Webview assets** — esbuild-bundled (`dist/*`); browser harness under `dev/` (`npm run dev`) speaks the real protocol with fixtures.
 
-## Locked decisions
+## Shipped
 
-- **Data grid:** [Tabulator](https://tabulator.info/), bundled via a new **esbuild** step for webview assets.
-- **Sidebar:** the existing webview explorer registered as a **`WebviewViewProvider`** in the activity-bar container (chosen 2026-07-02 over the earlier native-`TreeDataProvider` plan — the polished webview tree is kept, with its own state persistence).
-- **SQL editor:** **native `.sql` editor + Run** command, with a status-bar active-connection indicator; results render in the shared grid.
+- **2026-06-23 — Stage 0 foundation:** esbuild pipeline, Tabulator grid, native theming, `executeRaw()` on both clients.
+- **2026-07-01 — Inspect + density pass:** compact toolbar, value viewer, aggregate strip, find-in-page, multi-column sort, raw WHERE, filter-by-cell.
+- **2026-07-02 — Sidebar + filters + export:** explorer moved into the sidebar with persistent tree state; `filters[]` ANDed with raw WHERE + chip UI; export (selection/page/table → CSV, TSV, JSON, SQL INSERTs, Markdown → file/clipboard) and whole-database SQL dump; grid readability fixes (scoped form CSS, translucent selection, flex height, layout-preserving refreshes, paging/find fixes).
+- **2026-07-02 — Rename + sidebar declutter:** OpenVSDB naming; title-bar Add/Refresh only; per-connection kebab (Export / Edit / Remove) that behaves at sidebar widths.
 
-## Architecture principles
+## Now (planned 2026-07-02)
 
-- **Shared ResultGrid:** refactor the table panel ([src/webview/tablePanelManager.ts](src/webview/tablePanelManager.ts) + [media/tablePanel.js](media/tablePanel.js)) into a reusable *ResultGrid* webview used by **both** table browsing and query results.
-- **`executeRaw()` linchpin:** add `executeRaw(sql): Promise<RawResult[]>` to `DatabaseClient` ([src/db/client.ts](src/db/client.ts)) + both clients. Unlocks Run Queries, copy-as-SQL, EXPLAIN, and DDL execution.
-- **Native theming:** VS Code theme tokens + codicons throughout; consistent toolbars; explicit loading / empty / error states.
+- [x] **CSV export** — shipped as part of the export flow (Export button → scope → CSV → file/clipboard). Nothing further planned here.
+- [ ] **Connection modal polish** — vertical rhythm between form sections (flex/gap stacks instead of unspaced blocks), tidier SSL details section.
+- [ ] **Test connection button** — in the add/edit modal; tests the *current form values* host-side (MySQL: real connect + `SELECT VERSION()`; SQLite: read-only open). Editing with a blank password reuses the stored secret. Result shown inline in the modal.
+- [ ] **Clear-text authentication** — "Allow cleartext authentication" checkbox on MySQL connections (the `mysql_clear_password` plugin, required by LDAP/PAM-backed servers; DataGrip parity). Persisted on the connection meta, wired into the mysql2 pool and the tester.
+- [ ] **SQL import** — kebab action per connection: pick a `.sql` file, confirm with a statement count (host-side modal), run through `executeRaw`, report statements/affected rows, refresh the tree and open grids.
+- [ ] **Query panel** — kebab action "New query" opens an editor-tab webview bound to the connection: SQL textarea, Run (⌘/Ctrl+Enter; runs the selection when one exists), per-statement results — Tabulator grid for row sets, affected-rows/insert-id summary for DML — with execution times and inline errors. DML runs refresh that connection's open table grids.
 
-## UI shell ✅ (implemented 2026-06-23, superseded 2026-07-02)
-~~The Database Explorer opens as a **main-window editor tab**~~ → the explorer now lives **in the sidebar** as a `WebviewViewProvider` (`dbExplorer.home`, `retainContextWhenHidden`); tables still open as their own grid tabs. The launcher tree + `viewsWelcome` hack is gone; `dbExplorer.open` focuses the view. The webview persists expanded schemas, selection, and the tree filter via `vscode.setState`/`getState`, so the tree no longer resets when the view is hidden or the window reloads. See `src/webview/explorerPanel.ts` (`ExplorerViewProvider`).
+## Later
 
-**Explorer polish ✅ (2026-07-01):** constrained-width column; compact tree rows with `@vscode/codicons` icons (table / view / schema / connection), hover + selection states, per-schema counts, and an in-tree filter box; connection status as a dot; Edit/Remove as icon buttons; Add/Edit connection moved into a modal dialog. `media/main.js` is now bundled by esbuild (for the codicon CSS import) → `dist/main.js` + `dist/main.css` (codicon font inlined; `font-src data:` allows it).
-
-**Grid density pass ✅ (2026-07-01):** table view rebuilt to a single compact toolbar (icon buttons; right-sized page-size select; find box), the structured filter collapsed behind a Filter toggle + active-filter chip, Apply/Cancel replaced by a contextual pending-changes bar, a collapsible DDL panel, ~28px Tabulator rows, aggregate strip that excludes PK / auto-increment columns, sentence-case section headers, and codicons bundled into the grid webview (`dist/tablePanel.css`).
-
-**Grid readability + stability pass ✅ (2026-07-02):** form-control CSS scoped away from the grid (`:where(:not(.tabulator *))`) so Tabulator's row-selection checkboxes and inline editors stop inheriting 32px full-width input chrome; row hover/selection changed from opaque list tokens to translucent `focusBorder` tints (text stays theme-colored in every theme, pending-edit highlight stays visible); the grid takes all remaining viewport height via flex instead of `calc(100vh - 360px)`; the grid is only rebuilt when columns or sort change — plain data refreshes go through `replaceData()`, preserving column widths/order/visibility and scroll; Next paging disabled on the last page; find-in-page survives refreshes.
-
-## Stage 0 — UX foundation ✅ (implemented 2026-06-23)
-- [x] esbuild build for webview assets (`media/tablePanel.js` → `dist/`), wired into npm scripts + the F5 preLaunchTask (`esbuild.js`).
-- [x] Integrate Tabulator: virtual scroll, column resize/reorder/show-hide, row selection, sticky header. (Freeze via header menu; multi-sort deferred to Stage 1 — the backend supports single-column sort today.)
-- [x] Table panel rebuilt on Tabulator. (Extracting it into a standalone ResultGrid module shared with the query console lands in Stage 4.)
-- [x] Native theming: VS Code theme tokens for controls + grid (`media/tabulator-vscode.css`); removed the hardcoded teal gradient. (Codicons deferred to Stage 1.)
-- [x] Add `executeRaw()` to the client interface + `mysqlClient` (multi-statement) / `sqliteClient` (statement splitter in `src/sql/statements.ts`, unit-tested).
-
-## Stage 1 — Inspect (2026-07-01)
-- [x] "Filter by this value" cell context action (right-click a cell).
-- [x] Cell **value viewer** (right-click → View value): pretty-prints JSON, scrolls for long text; Copy value.
-- [x] **Aggregate strip** under the grid: count + sum/avg/min/max per numeric column, over the selection (or the loaded page).
-- [x] **Find in page**: client-side filter across the loaded rows.
-- [x] **Multi-column sort** — shift-click headers; `TableQuery.sort` is now a `SortSpec[]`, `buildOrderByClause` joins the terms, and the header shows priority badges.
-- [x] **Raw `WHERE` filter bar** — a WHERE field in the filter popover; `TableQuery.where` + `buildFilterClause` thread it through both clients including the count query.
-- [x] **Multiple filters (2026-07-02)** — `TableQuery.filters: FilterSpec[]` ANDed together *and* with the raw WHERE; chip-per-filter UI with individual remove; "Filter by this value" appends (drill-down) instead of replacing.
-- [ ] Jump-to-page control; image / hex-blob value viewers (minor; deferred).
-
-## Stage 2 — Change values
-- [ ] Type-aware inline editors (text / number / boolean / date / NULL).
-- [ ] Changed-cell highlighting + sticky "N changes · Submit / Revert" bar.
-- [ ] **DML preview** — show the exact SQL before commit.
-- [ ] Add / duplicate / delete rows via toolbar + context menu + multi-select.
-- [ ] Transaction-mode toggle (auto / manual commit).
-- Touches: `tablePanelManager.ts` mutation handlers, client insert/update/delete, `keyStrategy.ts`.
-
-## Stage 3 — Export (core ✅ 2026-07-02)
-- [x] Scope: selection / current page / whole table (honours active filters + sort).
-- [x] Formats: CSV, TSV, JSON, SQL `INSERT`s, Markdown (`src/export/extractors.ts`, unit-tested).
-- [x] Destinations: file (save dialog) + clipboard, via a QuickPick flow from the table panel's Export button (`src/export/exportService.ts`).
-- [x] **Whole-database SQL dump** (DDL + INSERTs, FK guards, views last) from the explorer's per-connection export button.
-- [ ] "Copy as …" cell/row context actions.
-- [ ] Options: custom delimiter, NULL token, encoding.
-
-## Stage 4 — Run queries
-- [ ] Command: **New SQL Console** → untitled `.sql` bound to a connection; status-bar connection picker.
-- [ ] Run statement-under-cursor / selection / whole file (keybindings).
-- [ ] `executeRaw` → multi-statement, multiple result sets in tabs; exec time, rows affected, inline errors.
-- [ ] Results reuse ResultGrid.
-- [ ] Query history (persist to `globalState`; search + re-run).
-- Touches: new `src/sql/console.ts`, `extension.ts`, `package.json` (commands/keybindings/menus), ResultGrid.
-
-## Stage 5 — Import
-- [ ] CSV / TSV / JSON → existing table via a column-mapping UI with live preview.
-- [ ] Header toggle, delimiter, type coercion, NULL handling, error policy.
-- [ ] Optional: create table from file (infer columns).
-- [ ] Batched insert in a transaction with progress.
-- Touches: new `src/import/*`, clients (batch insert), webview mapping UI.
-
-## Dev tooling ✅ (2026-07-02, branch chore/dev-tooling)
-Iteration-speed pass:
-- **esbuild bundles the extension host** (`dist/extension.js`, deps external); `tsc --noEmit` is type-check only; `npm run watch` runs both watchers (npm-run-all).
-- **Watch-based F5**: background `npm: watch` task (`$esbuild-watch`/`$tsc-watch` matchers, requires `connor4312.esbuild-problem-matchers`, recommended in `.vscode/extensions.json`); one-shot `npm: build` kept as fallback if F5 ever hangs waiting on the matcher.
-- **Browser harness**: `npm run dev` serves `dev/table.html` + `dev/explorer.html` (port 8378) with live reload; `media/vscodeApi.js` shims `acquireVsCodeApi`; `dev/fixtures.js` speaks the real protocol with a mutable fixture table. Caveat: the browser is more permissive than a webview (no strict CSP; `confirm()` works in-browser but NOT in webviews) — re-verify risky changes in the Extension Development Host.
-- **In-host auto-reload**: in development mode the extension watches `dist/` (fs.watch, debounced) and re-renders open webview panels on rebuild.
-- **Tests via tsx**: `npm test` / `npm run test:watch` run the TS test files directly — no compile step.
-- **Packaging fixed**: `main` → `dist/extension.js` and `.vscodeignore` now ships `dist/` + runtime `media/` assets (previously the compiled output was excluded, so a `.vsix` shipped no code). Note: the `.vsix` is platform-specific (sqlite3 prebuilt binary).
-
-## Later — full DataGrip parity
-PostgreSQL / MariaDB / MSSQL clients · context-aware autocomplete (`CompletionItemProvider`) · richer schema tree (indexes / FKs / procedures / functions / triggers / sequences / users) · DDL execution + visual table editor · FK navigation in grid · ER diagrams · EXPLAIN viewer · environment color-coding & safety guards · schema/data compare · AI NL→SQL · SSH tunnels.
+- Query panel v2: query history (globalState), export/copy of result grids, autocomplete, EXPLAIN viewer, native `.sql` editor + status-bar connection binding.
+- Change values v2: type-aware inline editors (date/boolean/NULL), DML preview before submit, transaction-mode toggle.
+- Import v2: CSV/TSV/JSON → table with column-mapping UI and batched transactional inserts.
+- Export v2: "Copy as …" cell/row context actions; delimiter/NULL-token/encoding options.
+- Inspect: jump-to-page control; image/hex blob viewers.
+- Broader parity: PostgreSQL/MariaDB/MSSQL clients, richer schema tree (indexes/FKs/procedures/triggers), FK navigation in the grid, ER diagrams, schema/data compare, environment color-coding, SSH tunnels.
 
 ## Verification
-- **Unit:** extend `test/` for export extractors, raw-WHERE building, and `executeRaw` result shaping.
-- **Manual:** launch the extension (F5), connect to a local MySQL and a SQLite file, then per stage run the workflow end-to-end — inspect a large table → edit + submit with DML preview → export CSV/JSON/SQL → run a multi-statement query → import a CSV.
-- **Later:** docker-based integration tests for the clients.
+
+- **Unit:** `npm test` (mocha/tsx) — SQL fragments, statement splitting, export extractors, key strategy.
+- **Manual:** `npm run dev` browser harness (`dev/explorer.html`, `dev/table.html`, `dev/query.html`) for webview UI; F5 Extension Development Host against a local MySQL + SQLite file for host-side flows (dialogs, QuickPicks, secrets, cleartext auth against an LDAP/PAM server).

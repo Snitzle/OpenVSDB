@@ -62,7 +62,7 @@ const extensionOptions = {
 
 /** @type {import('esbuild').BuildOptions} */
 const webviewOptions = {
-  entryPoints: ['media/tablePanel.js', 'media/main.js'],
+  entryPoints: ['media/tablePanel.js', 'media/main.js', 'media/queryPanel.js'],
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -94,7 +94,7 @@ async function main() {
       // Serving the repo root lets dev/*.html reference /dist and /media, and
       // exposes esbuild's /esbuild SSE endpoint for live reload.
       const { port } = await webviewCtx.serve({ servedir: '.', port: SERVE_PORT });
-      console.log(`[serve] harness: http://localhost:${port}/dev/table.html · /dev/explorer.html`);
+      console.log(`[serve] harness: http://localhost:${port}/dev/table.html · /dev/explorer.html · /dev/query.html`);
     }
 
     console.log('[esbuild] watching...');
