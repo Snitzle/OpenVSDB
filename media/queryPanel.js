@@ -80,6 +80,10 @@ import { getVsCodeApi } from './vscodeApi.js';
         );
         break;
 
+      case 'info':
+        showStatus(message.message);
+        break;
+
       case 'error':
         setRunning(false);
         showStatus(message.message, true);
@@ -151,7 +155,22 @@ import { getVsCodeApi } from './vscodeApi.js';
         meta.textContent = `Statement ${index + 1} · ${result.rowCount} row${
           result.rowCount === 1 ? '' : 's'
         } · ${result.durationMs}ms`;
-        section.appendChild(meta);
+
+        const header = document.createElement('div');
+        header.className = 'resultHeader';
+        header.appendChild(meta);
+
+        const exportBtn = document.createElement('button');
+        exportBtn.className = 'iconBtn';
+        exportBtn.title = 'Export this result';
+        exportBtn.setAttribute('aria-label', 'Export this result');
+        exportBtn.innerHTML = '<i class="codicon codicon-desktop-download" aria-hidden="true"></i>';
+        exportBtn.addEventListener('click', () => {
+          sendRequest('exportResults', { statementIndex: index });
+        });
+        header.appendChild(exportBtn);
+
+        section.appendChild(header);
 
         const gridWrap = document.createElement('div');
         section.appendChild(gridWrap);

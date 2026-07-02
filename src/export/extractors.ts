@@ -4,18 +4,36 @@ import { Scalar } from '../types';
 export type ExportFormat = 'csv' | 'tsv' | 'json' | 'sql' | 'markdown';
 
 export interface ExportTableData {
+  /** Empty for datasets with no home table (query results). */
   schema: string;
   table: string;
   columns: string[];
   rows: Scalar[][];
+  /** Terminated CREATE statement, emitted before INSERTs by the SQL format. */
+  ddl?: string;
 }
 
-export const EXPORT_FORMATS: Array<{ format: ExportFormat; label: string; extension: string }> = [
-  { format: 'csv', label: 'CSV', extension: 'csv' },
-  { format: 'tsv', label: 'TSV', extension: 'tsv' },
-  { format: 'json', label: 'JSON', extension: 'json' },
-  { format: 'sql', label: 'SQL INSERTs', extension: 'sql' },
-  { format: 'markdown', label: 'Markdown table', extension: 'md' },
+export interface ExportFormatSpec {
+  format: ExportFormat;
+  label: string;
+  extension: string;
+  /** Multi-table layout: one concatenated script, or one file per table. */
+  container: 'single-file' | 'per-table';
+  supportsClipboard: boolean;
+}
+
+export const EXPORT_FORMATS: ExportFormatSpec[] = [
+  { format: 'csv', label: 'CSV', extension: 'csv', container: 'per-table', supportsClipboard: true },
+  { format: 'tsv', label: 'TSV', extension: 'tsv', container: 'per-table', supportsClipboard: true },
+  { format: 'json', label: 'JSON', extension: 'json', container: 'per-table', supportsClipboard: true },
+  {
+    format: 'sql',
+    label: 'SQL dump (DDL + INSERTs)',
+    extension: 'sql',
+    container: 'single-file',
+    supportsClipboard: true,
+  },
+  { format: 'markdown', label: 'Markdown table', extension: 'md', container: 'per-table', supportsClipboard: true },
 ];
 
 export function renderExport(format: ExportFormat, data: ExportTableData, dialect: SqlDialect): string {
@@ -26,8 +44,10 @@ export function renderExport(format: ExportFormat, data: ExportTableData, dialec
       return renderDelimited(data, '\t');
     case 'json':
       return renderJson(data);
-    case 'sql':
-      return sqlInsertStatements(data, dialect).join('\n');
+    case 'sql': {
+      const statements = sqlInsertStatements(data, dialect);
+      return data.ddl ? [data.ddl.trim(), ...statements].join('\n') : statements.join('\n');
+    }
     case 'markdown':
       return renderMarkdown(data);
     default:
@@ -37,13 +57,34 @@ export function renderExport(format: ExportFormat, data: ExportTableData, dialec
 
 /** One INSERT statement per row; also used by the whole-database dump. */
 export function sqlInsertStatements(data: ExportTableData, dialect: SqlDialect): string[] {
-  const tableSql = quoteQualifiedIdentifier(dialect, data.schema, data.table);
+  const tableSql = data.schema
+    ? quoteQualifiedIdentifier(dialect, data.schema, data.table)
+    : quoteIdentifier(dialect, data.table);
   const columnsSql = data.columns.map((column) => quoteIdentifier(dialect, column)).join(', ');
 
   return data.rows.map((row) => {
     const values = row.map((value) => sqlLiteral(value, dialect)).join(', ');
     return `INSERT INTO ${tableSql} (${columnsSql}) VALUES (${values});`;
   });
+}
+
+/**
+ * Adapt a raw query result (columns + positional rows) into exportable table
+ * data. Query results may repeat column names (joins, `count(*)` aliases);
+ * duplicates are suffixed so JSON keys cannot collide.
+ */
+export function rawResultToExportData(
+  result: { columns: string[]; rows: Scalar[][] },
+  tableName: string,
+): ExportTableData {
+  const seen = new Map<string, number>();
+  const columns = result.columns.map((name) => {
+    const count = (seen.get(name) ?? 0) + 1;
+    seen.set(name, count);
+    return count === 1 ? name : `${name}_${count}`;
+  });
+
+  return { schema: '', table: tableName, columns, rows: result.rows };
 }
 
 export function sqlLiteral(value: Scalar, dialect: SqlDialect): string {

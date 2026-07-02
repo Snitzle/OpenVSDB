@@ -440,7 +440,7 @@ import { getVsCodeApi } from './vscodeApi.js';
           onSelect: () => sendRequest('importSql', { connectionId: connection.connectionId }),
         });
         menuItems.push({
-          label: 'Export database',
+          label: 'Export database…',
           icon: 'codicon-desktop-download',
           onSelect: () => sendRequest('exportDatabase', { connectionId: connection.connectionId }),
         });

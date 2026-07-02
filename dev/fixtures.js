@@ -320,6 +320,12 @@
           : [{ kind: 'error', message: 'Nothing to run.' }];
       }
 
+      case 'exportResults':
+        return [{
+          kind: 'info',
+          message: `[harness] Would export result set ${message.statementIndex + 1} (host-side QuickPicks).`,
+        }];
+
       default:
         return [{ kind: 'info', message: `[harness] Unhandled request: ${message.kind}` }];
     }

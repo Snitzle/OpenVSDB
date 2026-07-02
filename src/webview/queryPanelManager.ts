@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { DbClientManager } from '../db/clientManager';
+import { promptAndExportQueryResult } from '../export/exportService';
 import { ConnectionStore } from '../state/connectionStore';
+import { RawQueryResult } from '../types';
 import { QueryPanelEvent, QueryPanelRequest } from './protocol';
 import { TablePanelManager } from './tablePanelManager';
 import { renderWebviewHtml, toUserError } from './utils';
@@ -63,6 +65,8 @@ class QueryPanelInstance implements vscode.Disposable {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private disposed = false;
+  /** Last run's results, retained so export never re-executes the query. */
+  private lastResults: RawQueryResult[] = [];
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -137,11 +141,26 @@ class QueryPanelInstance implements vscode.Disposable {
         case 'runQuery': {
           const client = await this.clientManager.getClient(this.connectionId);
           const results = await client.executeRaw(message.sql);
+          this.lastResults = results;
           this.postEvent({ kind: 'queryResults', results }, message.requestId);
 
           // DML/DDL may have changed data that open grids are showing.
           if (results.some((result) => result.affectedRows !== undefined)) {
             await this.tablePanels.refreshConnection(this.connectionId);
+          }
+          return;
+        }
+
+        case 'exportResults': {
+          const result = this.lastResults[message.statementIndex];
+          if (!result) {
+            throw new Error('That result set is no longer available — re-run the query.');
+          }
+
+          const client = await this.clientManager.getClient(this.connectionId);
+          const outcome = await promptAndExportQueryResult(client.dialect, result);
+          if (outcome) {
+            this.postEvent({ kind: 'info', message: outcome }, message.requestId);
           }
           return;
         }

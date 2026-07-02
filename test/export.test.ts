@@ -1,5 +1,11 @@
 import { strict as assert } from 'assert';
-import { ExportTableData, renderExport, sqlInsertStatements, sqlLiteral } from '../src/export/extractors';
+import {
+  ExportTableData,
+  rawResultToExportData,
+  renderExport,
+  sqlInsertStatements,
+  sqlLiteral,
+} from '../src/export/extractors';
 
 const data: ExportTableData = {
   schema: 'main',
@@ -50,6 +56,41 @@ describe('export extractors', () => {
       statements[1],
       'INSERT INTO "main"."users" ("id", "name", "notes", "score") VALUES (2, \'O\'\'Brien\', NULL, NULL);',
     );
+  });
+
+  it('emits the DDL before the INSERTs when present', () => {
+    const sql = renderExport(
+      'sql',
+      { ...data, rows: [data.rows[0]], ddl: 'CREATE TABLE "users" ("id" INTEGER);' },
+      'sqlite',
+    );
+    const lines = sql.split('\n');
+
+    assert.equal(lines[0], 'CREATE TABLE "users" ("id" INTEGER);');
+    assert.ok(lines[1].startsWith('INSERT INTO "main"."users"'));
+  });
+
+  it('uses an unqualified table name when the dataset has no schema', () => {
+    const statements = sqlInsertStatements(
+      { schema: '', table: 'query_result', columns: ['id'], rows: [[1]] },
+      'mysql',
+    );
+
+    assert.equal(statements[0], 'INSERT INTO `query_result` (`id`) VALUES (1);');
+  });
+
+  it('suffixes duplicate column names when adapting query results', () => {
+    const adapted = rawResultToExportData(
+      { columns: ['id', 'id', 'name', 'id'], rows: [[1, 2, 'a', 3]] },
+      'joined',
+    );
+
+    assert.deepEqual(adapted.columns, ['id', 'id_2', 'name', 'id_3']);
+    assert.equal(adapted.table, 'joined');
+    assert.equal(adapted.schema, '');
+
+    const parsed = JSON.parse(renderExport('json', adapted, 'sqlite'));
+    assert.deepEqual(parsed[0], { id: 1, id_2: 2, name: 'a', id_3: 3 });
   });
 
   it('escapes backslashes for MySQL literals only', () => {

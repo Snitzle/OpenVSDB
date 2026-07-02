@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { DbClientManager } from '../db/clientManager';
 import { testConnection } from '../db/testConnection';
-import { exportDatabaseDump } from '../export/exportService';
+import { promptAndExportDatabase } from '../export/exportService';
 import { splitSqlStatements } from '../sql/statements';
 import { ConnectionStore } from '../state/connectionStore';
 import { ConnectionInput, ConnectionMeta, ConnectionTreeNode } from '../types';
@@ -327,9 +327,9 @@ export class ExplorerViewProvider implements vscode.WebviewViewProvider, vscode.
     }
 
     const client = await this.clientManager.getClient(connectionId);
-    const saved = await exportDatabaseDump(client, connection.name);
-    if (saved) {
-      this.postEvent({ kind: 'info', message: `Database exported to ${saved}.` }, requestId);
+    const outcome = await promptAndExportDatabase(client, connection.name);
+    if (outcome) {
+      this.postEvent({ kind: 'info', message: outcome }, requestId);
     }
   }
 

@@ -884,6 +884,13 @@ body[data-surface='panel'] .ddl {
   gap: var(--space-1);
 }
 
+.resultHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .resultMeta {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);

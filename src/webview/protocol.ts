@@ -95,9 +95,11 @@ export type TablePanelEvent =
 
 export type QueryPanelRequest =
   | ({ kind: 'ready' } & RequestBase)
-  | ({ kind: 'runQuery'; sql: string } & RequestBase);
+  | ({ kind: 'runQuery'; sql: string } & RequestBase)
+  | ({ kind: 'exportResults'; statementIndex: number } & RequestBase);
 
 export type QueryPanelEvent =
   | ({ kind: 'queryConfig'; connectionName: string; dialect: 'mysql' | 'sqlite' } & EventBase)
   | ({ kind: 'queryResults'; results: RawQueryResult[] } & EventBase)
+  | ({ kind: 'info'; message: string } & EventBase)
   | ({ kind: 'error'; message: string; details?: string } & EventBase);

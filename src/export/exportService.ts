@@ -2,24 +2,25 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DatabaseClient } from '../db/client';
-import { FilterSpec, RowData, SortSpec, TableInfo } from '../types';
-import { EXPORT_FORMATS, ExportFormat, ExportTableData, renderExport, sqlInsertStatements } from './extractors';
+import { SqlDialect } from '../sql/identifier';
+import { RawQueryResult, RowData } from '../types';
+import {
+  EXPORT_FORMATS,
+  ExportFormatSpec,
+  rawResultToExportData,
+  renderExport,
+  sqlInsertStatements,
+} from './extractors';
+import {
+  ExportScope,
+  ExportTarget,
+  collectTableData,
+  describeActiveView,
+  iterateDatabaseTables,
+  tableCreateStatement,
+} from './tableSource';
 
-/** The table view an export starts from — current page, sort, and filters. */
-export interface ExportTarget {
-  schema: string;
-  table: string;
-  objectType: 'table' | 'view';
-  page: number;
-  pageSize: number;
-  sort?: SortSpec[];
-  filters?: FilterSpec[];
-  where?: string;
-}
-
-type ExportScope = 'selection' | 'page' | 'table';
-
-const DUMP_PAGE_SIZE = 1000;
+export type { ExportTarget } from './tableSource';
 
 /**
  * Drive the export QuickPick flow (scope → format → destination) for a table
@@ -31,7 +32,7 @@ export async function promptAndExportTable(
   target: ExportTarget,
   selection: RowData[],
 ): Promise<string | undefined> {
-  const scope = await pickScope(selection.length);
+  const scope = await pickScope(selection.length, describeActiveView(target));
   if (!scope) {
     return undefined;
   }
@@ -41,14 +42,20 @@ export async function promptAndExportTable(
     return undefined;
   }
 
-  const destination = await pickDestination();
+  const destination = await pickDestination(format);
   if (!destination) {
     return undefined;
   }
 
   const data = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `Exporting ${target.schema}.${target.table}…` },
-    () => collectTableData(client, target, scope, selection),
+    async () => {
+      const collected = await collectTableData(client, target, scope, selection);
+      if (format.format === 'sql' && target.objectType === 'table') {
+        collected.ddl = await tableCreateStatement(client, target.schema, target.table);
+      }
+      return collected;
+    },
   );
 
   const text = renderExport(format.format, data, client.dialect);
@@ -72,10 +79,91 @@ export async function promptAndExportTable(
 }
 
 /**
- * Dump every table (DDL + INSERTs) and view (DDL) of the connection into one
- * .sql file. Returns the saved path, or undefined if the user cancelled.
+ * Whole-database export: a single SQL dump file, or a folder of per-table CSV
+ * files. Returns a status message, or undefined if the user cancelled.
  */
-export async function exportDatabaseDump(
+export async function promptAndExportDatabase(
+  client: DatabaseClient,
+  connectionName: string,
+): Promise<string | undefined> {
+  const layout = await vscode.window.showQuickPick(
+    [
+      {
+        label: 'SQL dump',
+        description: 'DDL + INSERTs in a single .sql file',
+        layout: 'sql' as const,
+      },
+      {
+        label: 'CSV',
+        description: 'a folder with one .csv file per table',
+        layout: 'csv' as const,
+      },
+    ],
+    { placeHolder: `Export database "${connectionName}" as…` },
+  );
+  if (!layout) {
+    return undefined;
+  }
+
+  if (layout.layout === 'sql') {
+    return exportDatabaseAsSqlDump(client, connectionName);
+  }
+
+  return exportDatabaseAsCsvFolder(client, connectionName);
+}
+
+/**
+ * Export one result set of a query panel run. Returns a status message, or
+ * undefined if the user cancelled.
+ */
+export async function promptAndExportQueryResult(
+  dialect: SqlDialect,
+  result: RawQueryResult,
+): Promise<string | undefined> {
+  const format = await pickFormat('SQL INSERTs');
+  if (!format) {
+    return undefined;
+  }
+
+  let tableName = 'query_result';
+  if (format.format === 'sql') {
+    const input = await vscode.window.showInputBox({
+      prompt: 'Table name for the INSERT statements',
+      value: tableName,
+    });
+    if (input === undefined) {
+      return undefined;
+    }
+    tableName = input.trim() || tableName;
+  }
+
+  const destination = await pickDestination(format);
+  if (!destination) {
+    return undefined;
+  }
+
+  const data = rawResultToExportData(result, tableName);
+  const text = renderExport(format.format, data, dialect);
+  const rowsLabel = `${data.rows.length} row${data.rows.length === 1 ? '' : 's'}`;
+
+  if (destination === 'clipboard') {
+    await vscode.env.clipboard.writeText(text);
+    return `Copied ${rowsLabel} to the clipboard as ${format.label}.`;
+  }
+
+  const uri = await vscode.window.showSaveDialog({
+    defaultUri: suggestedUri(`query-result.${format.extension}`),
+    saveLabel: 'Export',
+  });
+  if (!uri) {
+    return undefined;
+  }
+
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));
+  return `Exported ${rowsLabel} to ${uri.fsPath}.`;
+}
+
+async function exportDatabaseAsSqlDump(
   client: DatabaseClient,
   connectionName: string,
 ): Promise<string | undefined> {
@@ -94,10 +182,47 @@ export async function exportDatabaseDump(
   );
 
   await vscode.workspace.fs.writeFile(uri, Buffer.from(script, 'utf8'));
-  return uri.fsPath;
+  return `Database exported to ${uri.fsPath}.`;
 }
 
-async function pickScope(selectionCount: number): Promise<ExportScope | undefined> {
+async function exportDatabaseAsCsvFolder(
+  client: DatabaseClient,
+  connectionName: string,
+): Promise<string | undefined> {
+  const folders = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Export here',
+    title: `Export "${connectionName}" tables as CSV`,
+  });
+  const folder = folders?.[0];
+  if (!folder) {
+    return undefined;
+  }
+
+  const count = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Exporting database "${connectionName}" as CSV…` },
+    async (progress) => {
+      let written = 0;
+      for await (const job of iterateDatabaseTables(client, { includeDdl: false, includeViewData: true })) {
+        progress.report({ message: `${job.schema}.${job.table}` });
+        const text = renderExport('csv', job.data, client.dialect);
+        const fileName = `${sanitizeFileName(`${job.schema}.${job.table}`)}.csv`;
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folder, fileName), Buffer.from(text, 'utf8'));
+        written += 1;
+      }
+      return written;
+    },
+  );
+
+  return `Exported ${count} table${count === 1 ? '' : 's'} as CSV to ${folder.fsPath}.`;
+}
+
+async function pickScope(
+  selectionCount: number,
+  viewDescription: string | undefined,
+): Promise<ExportScope | undefined> {
   const items: Array<vscode.QuickPickItem & { scope: ExportScope }> = [];
   if (selectionCount > 0) {
     items.push({
@@ -106,91 +231,37 @@ async function pickScope(selectionCount: number): Promise<ExportScope | undefine
     });
   }
   items.push(
-    { label: 'Current page', scope: 'page' },
-    { label: 'Entire table', description: 'honours the active filters and sort', scope: 'table' },
+    { label: 'Current page', description: viewDescription, scope: 'page' },
+    {
+      label: 'Entire table',
+      description: viewDescription ? `${viewDescription} applied` : 'no filters active',
+      scope: 'table',
+    },
   );
 
   const picked = await vscode.window.showQuickPick(items, { placeHolder: 'What should be exported?' });
   return picked?.scope;
 }
 
-async function pickFormat(): Promise<(typeof EXPORT_FORMATS)[number] | undefined> {
-  const items = EXPORT_FORMATS.map((entry) => ({ label: entry.label, entry }));
+async function pickFormat(sqlLabelOverride?: string): Promise<ExportFormatSpec | undefined> {
+  const items = EXPORT_FORMATS.map((entry) => ({
+    label: entry.format === 'sql' && sqlLabelOverride ? sqlLabelOverride : entry.label,
+    entry,
+  }));
   const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Export format' });
   return picked?.entry;
 }
 
-async function pickDestination(): Promise<'file' | 'clipboard' | undefined> {
-  const picked = await vscode.window.showQuickPick(
-    [
-      { label: '$(save) Save to file', destination: 'file' as const },
-      { label: '$(clippy) Copy to clipboard', destination: 'clipboard' as const },
-    ],
-    { placeHolder: 'Export destination' },
-  );
+async function pickDestination(format: ExportFormatSpec): Promise<'file' | 'clipboard' | undefined> {
+  const items: Array<vscode.QuickPickItem & { destination: 'file' | 'clipboard' }> = [
+    { label: '$(save) Save to file', destination: 'file' },
+  ];
+  if (format.supportsClipboard) {
+    items.push({ label: '$(clippy) Copy to clipboard', destination: 'clipboard' });
+  }
+
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Export destination' });
   return picked?.destination;
-}
-
-async function collectTableData(
-  client: DatabaseClient,
-  target: ExportTarget,
-  scope: ExportScope,
-  selection: RowData[],
-): Promise<ExportTableData> {
-  if (scope === 'selection') {
-    const info = await client.getTableInfo(target.schema, target.table, target.objectType);
-    return toExportData(info, selection);
-  }
-
-  if (scope === 'page') {
-    const result = await client.queryTableRows(
-      {
-        schema: target.schema,
-        table: target.table,
-        page: target.page,
-        pageSize: target.pageSize,
-        sort: target.sort,
-        filters: target.filters,
-        where: target.where,
-      },
-      target.objectType,
-    );
-    return toExportData(result.info, result.rows);
-  }
-
-  const rows: RowData[] = [];
-  let info: TableInfo | undefined;
-  for (let page = 0; ; page += 1) {
-    const result = await client.queryTableRows(
-      {
-        schema: target.schema,
-        table: target.table,
-        page,
-        pageSize: DUMP_PAGE_SIZE,
-        sort: target.sort,
-        filters: target.filters,
-        where: target.where,
-      },
-      target.objectType,
-    );
-    info = result.info;
-    rows.push(...result.rows);
-    if (result.rows.length < DUMP_PAGE_SIZE) {
-      break;
-    }
-  }
-
-  return toExportData(info as TableInfo, rows);
-}
-
-function toExportData(info: TableInfo, rows: RowData[]): ExportTableData {
-  const columns = info.columns.map((column) => column.name);
-  return {
-    schema: info.schema,
-    table: info.name,
-    columns,
-    rows: rows.map((row) => columns.map((column) => row.values[column] ?? null)),
-  };
 }
 
 async function buildDatabaseDump(
@@ -204,44 +275,25 @@ async function buildDatabaseDump(
     lines.push('PRAGMA foreign_keys=OFF;', 'BEGIN TRANSACTION;');
   }
 
-  const schemas = await client.listSchemas();
-  const views: Array<{ schema: string; name: string }> = [];
+  const viewSections: string[] = [];
 
-  for (const schema of schemas) {
-    const objects = await client.listObjects(schema);
+  for await (const job of iterateDatabaseTables(client, { includeDdl: true, includeViewData: false })) {
+    progress.report({ message: `${job.schema}.${job.table}` });
 
-    for (const object of objects) {
-      if (object.type === 'view') {
-        views.push({ schema, name: object.name });
-        continue;
-      }
-
-      progress.report({ message: `${schema}.${object.name}` });
-      lines.push('', `-- Table ${schema}.${object.name}`);
-      lines.push(await tableCreateStatement(client, schema, object.name));
-
-      const data = await collectTableData(
-        client,
-        {
-          schema,
-          table: object.name,
-          objectType: 'table',
-          page: 0,
-          pageSize: DUMP_PAGE_SIZE,
-        },
-        'table',
-        [],
-      );
-      lines.push(...sqlInsertStatements(data, client.dialect));
+    if (job.objectType === 'view') {
+      viewSections.push('', `-- View ${job.schema}.${job.table}`, job.data.ddl ?? '-- DDL unavailable');
+      continue;
     }
+
+    lines.push('', `-- Table ${job.schema}.${job.table}`);
+    if (job.data.ddl) {
+      lines.push(job.data.ddl);
+    }
+    lines.push(...sqlInsertStatements(job.data, client.dialect));
   }
 
-  for (const view of views) {
-    progress.report({ message: `${view.schema}.${view.name}` });
-    lines.push('', `-- View ${view.schema}.${view.name}`);
-    const ddl = await client.getDdl(view.schema, view.name, 'view');
-    lines.push(ensureTerminated(ddl.trim()));
-  }
+  // Views come last: they may reference any table.
+  lines.push(...viewSections);
 
   if (client.dialect === 'mysql') {
     lines.push('', 'SET FOREIGN_KEY_CHECKS=1;');
@@ -250,18 +302,6 @@ async function buildDatabaseDump(
   }
 
   return `${lines.join('\n')}\n`;
-}
-
-async function tableCreateStatement(client: DatabaseClient, schema: string, table: string): Promise<string> {
-  let ddl = await client.getDdl(schema, table, 'table');
-  // The SQLite client appends PRAGMA info as trailing comment blocks; keep only
-  // the CREATE statement so the dump stays executable.
-  ddl = ddl.split('\n\n-- PRAGMA table_info')[0].trim();
-  return ensureTerminated(ddl);
-}
-
-function ensureTerminated(sql: string): string {
-  return sql.endsWith(';') ? sql : `${sql};`;
 }
 
 function suggestedUri(fileName: string): vscode.Uri {
